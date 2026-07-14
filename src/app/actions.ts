@@ -7,27 +7,42 @@ export interface ClientWithLogs extends Client {
   logs: ClientLog[];
 }
 
-export async function getClients(search = '', category = '') {
+export async function getClients(search = '', category = '', page = 1, limit = 12) {
   try {
-    let query = 'SELECT * FROM clients WHERE 1=1';
+    let whereClause = ' WHERE 1=1';
     const params: (string | number)[] = [];
 
     if (search.trim()) {
-      query += ' AND (name LIKE ? OR businessName LIKE ? OR phone LIKE ? OR address LIKE ?)';
+      whereClause += ' AND (name LIKE ? OR businessName LIKE ? OR phone LIKE ? OR address LIKE ?)';
       const searchParam = `%${search.trim()}%`;
       params.push(searchParam, searchParam, searchParam, searchParam);
     }
 
     if (category && category !== 'ALL') {
-      query += ' AND category = ?';
+      whereClause += ' AND category = ?';
       params.push(category);
     }
 
-    query += ' ORDER BY updatedAt DESC';
+    // Get total count for pagination
+    const countStmt = db.prepare(`SELECT COUNT(*) as count FROM clients${whereClause}`);
+    const totalResult = countStmt.get(...params) as { count: number };
+    const total = totalResult.count;
 
+    // Fetch paginated records
+    const offset = (page - 1) * limit;
+    const query = `SELECT * FROM clients${whereClause} ORDER BY updatedAt DESC LIMIT ? OFFSET ?`;
     const stmt = db.prepare(query);
-    const clients = stmt.all(...params) as Client[];
-    return { success: true, data: clients };
+    const clients = stmt.all(...params, limit, offset) as Client[];
+
+    return { 
+      success: true, 
+      data: {
+        clients,
+        total,
+        page,
+        pages: Math.ceil(total / limit)
+      }
+    };
   } catch (error) {
     console.error('Error fetching clients:', error);
     return { success: false, error: 'Failed to fetch clients' };

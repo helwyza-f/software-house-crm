@@ -67,6 +67,11 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT
   );
+
+  CREATE INDEX IF NOT EXISTS idx_clients_category ON clients(category);
+  CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
+  CREATE INDEX IF NOT EXISTS idx_clients_businessName ON clients(businessName);
+  CREATE INDEX IF NOT EXISTS idx_client_logs_clientId ON client_logs(clientId);
 `);
 
 // Migration: Add customValues column to clients if it doesn't exist

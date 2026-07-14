@@ -39,6 +39,16 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
+import { 
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -56,14 +66,23 @@ import {
   Filter, 
   Calendar,
   Settings,
-  X
+  X,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 export default function Dashboard() {
   const [clients, setClients] = useState<Client[]>([]);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   
+  // Pagination states
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalClients, setTotalClients] = useState(0);
+  const itemsPerPage = 12;
+
   // Custom global variables/fields
   const [customFields, setCustomFields] = useState<string[]>([]);
   const [newFieldName, setNewFieldName] = useState('');
@@ -73,6 +92,7 @@ export default function Dashboard() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [deleteClientId, setDeleteClientId] = useState<number | null>(null);
   
   // Form states
   const [formData, setFormData] = useState({
@@ -89,12 +109,23 @@ export default function Dashboard() {
   const [selectedClientData, setSelectedClientData] = useState<ClientWithLogs | null>(null);
   const [newLogText, setNewLogText] = useState('');
 
+  // Search Debounce Effect
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1); // Reset to page 1 on new search
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   // Fetch clients function
   const fetchClients = () => {
     startTransition(async () => {
-      const res = await getClients(search, categoryFilter);
+      const res = await getClients(debouncedSearch, categoryFilter, page, itemsPerPage);
       if (res.success && res.data) {
-        setClients(res.data);
+        setClients(res.data.clients);
+        setTotalPages(res.data.pages);
+        setTotalClients(res.data.total);
       } else {
         toast.error(res.error || 'Gagal memuat data client');
       }
@@ -111,7 +142,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchClients();
-  }, [search, categoryFilter]);
+  }, [debouncedSearch, categoryFilter, page]);
 
   useEffect(() => {
     fetchCustomFields();
@@ -203,18 +234,17 @@ export default function Dashboard() {
 
   // Delete client handler
   const handleDelete = async (id: number) => {
-    if (confirm('Apakah Anda yakin ingin menghapus client ini beserta semua lognya?')) {
-      const res = await deleteClient(id);
-      if (res.success) {
-        toast.success('Client berhasil dihapus');
-        fetchClients();
-        if (isLogsOpen && selectedClientId === id) {
-          setIsLogsOpen(false);
-        }
-      } else {
-        toast.error(res.error || 'Gagal menghapus client');
+    const res = await deleteClient(id);
+    if (res.success) {
+      toast.success('Client berhasil dihapus');
+      fetchClients();
+      if (isLogsOpen && selectedClientId === id) {
+        setIsLogsOpen(false);
       }
+    } else {
+      toast.error(res.error || 'Gagal menghapus client');
     }
+    setDeleteClientId(null);
   };
 
   // Add new log entry handler
@@ -368,7 +398,7 @@ export default function Dashboard() {
           ].map((btn) => (
             <button
               key={btn.value}
-              onClick={() => setCategoryFilter(btn.value)}
+              onClick={() => { setCategoryFilter(btn.value); setPage(1); }}
               className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all ${
                 categoryFilter === btn.value
                   ? 'bg-slate-900 text-white shadow-sm'
@@ -382,9 +412,9 @@ export default function Dashboard() {
       </section>
 
       {/* Clients List */}
-      <main className="flex-grow">
+      <main className="flex-grow flex flex-col gap-6">
         {clients.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 px-4 border border-dashed border-slate-200 rounded-2xl bg-white text-center gap-3 max-w-md mx-auto">
+          <div className="flex flex-col items-center justify-center py-12 px-4 border border-dashed border-slate-200 rounded-2xl bg-white text-center gap-3 max-w-md mx-auto w-full">
             <User className="h-10 w-10 text-slate-300" />
             <div className="space-y-1">
               <p className="text-sm font-medium text-slate-700">Belum ada data client</p>
@@ -402,102 +432,136 @@ export default function Dashboard() {
             </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {clients.map((client) => {
-              // Parse custom fields if any
-              let customValuesObj: Record<string, string> = {};
-              try {
-                customValuesObj = JSON.parse(client.customValues || '{}');
-              } catch {}
-              const filledCustoms = Object.entries(customValuesObj).filter(([_, val]) => val.trim());
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {clients.map((client) => {
+                // Parse custom fields if any
+                let customValuesObj: Record<string, string> = {};
+                try {
+                  customValuesObj = JSON.parse(client.customValues || '{}');
+                } catch {}
+                const filledCustoms = Object.entries(customValuesObj).filter(([_, val]) => val.trim());
 
-              return (
-                <Card key={client.id} className="border border-slate-100 shadow-sm rounded-2xl bg-white hover:shadow-md transition-all flex flex-col justify-between">
-                  <div>
-                    <CardHeader className="p-4 pb-2.5 flex flex-row items-start justify-between gap-4 space-y-0">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-slate-900 text-base">{client.name}</span>
-                          {getCategoryBadge(client.category)}
+                return (
+                  <Card key={client.id} className="border border-slate-100 shadow-sm rounded-2xl bg-white hover:shadow-md transition-all flex flex-col justify-between">
+                    <div>
+                      <CardHeader className="p-4 pb-2.5 flex flex-row items-start justify-between gap-4 space-y-0">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-slate-900 text-base">{client.name}</span>
+                            {getCategoryBadge(client.category)}
+                          </div>
+                          <CardDescription className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
+                            <Building2 className="h-3.5 w-3.5 text-slate-400" /> {client.businessName}
+                          </CardDescription>
                         </div>
-                        <CardDescription className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
-                          <Building2 className="h-3.5 w-3.5 text-slate-400" /> {client.businessName}
-                        </CardDescription>
-                      </div>
-                    </CardHeader>
-                    
-                    <CardContent className="px-4 py-0 pb-3 text-xs space-y-2 text-slate-500">
-                      <div className="flex items-center gap-2">
-                        <Phone className="h-3.5 w-3.5 text-slate-400" />
-                        <a href={`tel:${client.phone}`} className="hover:underline text-slate-600 font-mono">
-                          {client.phone}
-                        </a>
-                      </div>
-                      {client.address && (
-                        <div className="flex items-start gap-2">
-                          <MapPin className="h-3.5 w-3.5 text-slate-400 mt-0.5" />
-                          <span className="leading-relaxed">{client.address}</span>
+                      </CardHeader>
+                      
+                      <CardContent className="px-4 py-0 pb-3 text-xs space-y-2 text-slate-500">
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-3.5 w-3.5 text-slate-400" />
+                          <a href={`tel:${client.phone}`} className="hover:underline text-slate-600 font-mono">
+                            {client.phone}
+                          </a>
                         </div>
-                      )}
+                        {client.address && (
+                          <div className="flex items-start gap-2">
+                            <MapPin className="h-3.5 w-3.5 text-slate-400 mt-0.5" />
+                            <span className="leading-relaxed">{client.address}</span>
+                          </div>
+                        )}
 
-                      {/* Display Custom Fields */}
-                      {filledCustoms.length > 0 && (
-                        <div className="pt-2 border-t border-slate-100/80 mt-2 flex flex-col gap-1">
-                          {filledCustoms.map(([label, val]) => (
-                            <div key={label} className="flex justify-between items-center text-[10px] bg-slate-50 border border-slate-100/50 p-1 px-2 rounded-lg">
-                              <span className="font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
-                              <span className="text-slate-700 font-medium">{val}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </div>
-                  
-                  <CardFooter className="px-4 py-3 bg-slate-50/50 rounded-b-2xl border-t border-slate-100/50 flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                      <Calendar className="h-3 w-3" /> Update: {formatDate(client.updatedAt)}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-8 w-8 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                        onClick={() => viewLogs(client.id)}
-                        title="Log & Keterangan"
-                      >
-                        <History className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
-                        onClick={() => startEdit(client)}
-                        title="Edit Data"
-                      >
-                        <Edit3 className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-8 w-8 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
-                        onClick={() => handleDelete(client.id)}
-                        title="Hapus"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                        {/* Display Custom Fields */}
+                        {filledCustoms.length > 0 && (
+                          <div className="pt-2 border-t border-slate-100/80 mt-2 flex flex-col gap-1">
+                            {filledCustoms.map(([label, val]) => (
+                              <div key={label} className="flex justify-between items-center text-[10px] bg-slate-50 border border-slate-100/50 p-1 px-2 rounded-lg">
+                                <span className="font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
+                                <span className="text-slate-700 font-medium">{val}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
                     </div>
-                  </CardFooter>
-                </Card>
-              );
-            })}
-          </div>
+                    
+                    <CardFooter className="px-4 py-3 bg-slate-50/50 rounded-b-2xl border-t border-slate-100/50 flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                        <Calendar className="h-3 w-3" /> Update: {formatDate(client.updatedAt)}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-8 w-8 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                          onClick={() => viewLogs(client.id)}
+                          title="Log & Keterangan"
+                        >
+                          <History className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
+                          onClick={() => startEdit(client)}
+                          title="Edit Data"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-8 w-8 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
+                          onClick={() => setDeleteClientId(client.id)}
+                          title="Hapus"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardFooter>
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-slate-150 pt-4 pb-2 mt-2 text-xs text-slate-500">
+                <span>
+                  Menampilkan <strong>{Math.min((page - 1) * itemsPerPage + 1, totalClients)}</strong> sampai <strong>{Math.min(page * itemsPerPage, totalClients)}</strong> dari <strong>{totalClients}</strong> client
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg"
+                    onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                    disabled={page === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-0.5" /> Prev
+                  </Button>
+                  <span className="font-medium text-slate-700 px-1">
+                    Hal {page} / {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg"
+                    onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                    disabled={page === totalPages}
+                  >
+                    Next <ChevronRight className="h-4 w-4 ml-0.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </main>
 
       {/* Footer Branding */}
       <footer className="text-center py-4">
-        <p className="text-[10px] text-slate-400 font-mono">LeadManager v1.1 • SQLite DB</p>
+        <p className="text-[10px] text-slate-400 font-mono">LeadManager v1.2 • SQLite DB</p>
       </footer>
 
       {/* Add Client Dialog */}
@@ -818,6 +882,29 @@ export default function Dashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Shadcn AlertDialog for Delete Confirmation */}
+      <AlertDialog open={!!deleteClientId} onOpenChange={(open) => !open && setDeleteClientId(null)}>
+        <AlertDialogContent className="max-w-sm rounded-2xl p-6">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lg">Konfirmasi Hapus</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              Apakah Anda yakin ingin menghapus data client ini secara permanen? Seluruh riwayat log aktivitas client ini juga akan ikut terhapus dan tidak dapat dikembalikan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-row items-center gap-2 justify-end mt-2">
+            <AlertDialogCancel className="text-xs m-0" size="sm">Batal</AlertDialogCancel>
+            <AlertDialogAction 
+              variant="destructive" 
+              size="sm" 
+              className="text-xs bg-rose-600 hover:bg-rose-700 text-white" 
+              onClick={() => deleteClientId && handleDelete(deleteClientId)}
+            >
+              Hapus Permanen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </div>
   );
