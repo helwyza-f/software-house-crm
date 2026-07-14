@@ -60,17 +60,21 @@ export async function createClient(
     businessName: string;
     address: string;
     category: 'High' | 'Medium' | 'Low';
+    customValues?: string;
   },
   initialLog?: string
 ) {
   try {
     const transaction = db.transaction(() => {
       const clientStmt = db.prepare(`
-        INSERT INTO clients (name, phone, businessName, address, category, createdAt, updatedAt)
-        VALUES (@name, @phone, @businessName, @address, @category, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        INSERT INTO clients (name, phone, businessName, address, category, customValues, createdAt, updatedAt)
+        VALUES (@name, @phone, @businessName, @address, @category, @customValues, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `);
       
-      const result = clientStmt.run(clientData);
+      const result = clientStmt.run({
+        ...clientData,
+        customValues: clientData.customValues || '{}'
+      });
       const clientId = result.lastInsertRowid as number;
 
       if (initialLog && initialLog.trim()) {
@@ -101,16 +105,17 @@ export async function updateClient(
     businessName: string;
     address: string;
     category: 'High' | 'Medium' | 'Low';
+    customValues?: string;
   }
 ) {
   try {
     const stmt = db.prepare(`
       UPDATE clients
-      SET name = @name, phone = @phone, businessName = @businessName, address = @address, category = @category, updatedAt = CURRENT_TIMESTAMP
+      SET name = @name, phone = @phone, businessName = @businessName, address = @address, category = @category, customValues = @customValues, updatedAt = CURRENT_TIMESTAMP
       WHERE id = @id
     `);
     
-    const result = stmt.run({ ...clientData, id });
+    const result = stmt.run({ ...clientData, customValues: clientData.customValues || '{}', id });
     
     if (result.changes === 0) {
       return { success: false, error: 'Client not found or no changes made' };
@@ -158,5 +163,35 @@ export async function addClientLog(clientId: number, logText: string) {
   } catch (error) {
     console.error('Error adding log:', error);
     return { success: false, error: 'Failed to add log' };
+  }
+}
+export async function getCustomFields() {
+  try {
+    const stmt = db.prepare("SELECT value FROM settings WHERE key = 'custom_fields'");
+    const row = stmt.get() as { value: string } | undefined;
+    if (!row) {
+      return { success: true, data: [] as string[] };
+    }
+    const fields = JSON.parse(row.value) as string[];
+    return { success: true, data: fields };
+  } catch (error) {
+    console.error('Error fetching custom fields:', error);
+    return { success: false, error: 'Failed to fetch custom fields', data: [] as string[] };
+  }
+}
+
+export async function saveCustomFields(fields: string[]) {
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO settings (key, value)
+      VALUES ('custom_fields', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `);
+    stmt.run(JSON.stringify(fields));
+    revalidatePath('/');
+    return { success: true };
+  } catch (error) {
+    console.error('Error saving custom fields:', error);
+    return { success: false, error: 'Failed to save custom fields' };
   }
 }

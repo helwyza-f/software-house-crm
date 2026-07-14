@@ -9,6 +9,7 @@ export interface Client {
   businessName: string;
   address: string;
   category: 'High' | 'Medium' | 'Low';
+  customValues?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -61,6 +62,18 @@ db.exec(`
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (clientId) REFERENCES clients (id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
 `);
+
+// Migration: Add customValues column to clients if it doesn't exist
+try {
+  db.exec("ALTER TABLE clients ADD COLUMN customValues TEXT DEFAULT '{}';");
+} catch {
+  // Column already exists, ignore error
+}
 
 export { db };

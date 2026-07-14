@@ -8,6 +8,8 @@ import {
   updateClient, 
   deleteClient, 
   addClientLog,
+  getCustomFields,
+  saveCustomFields,
   ClientWithLogs
 } from './actions';
 import { Client } from '@/lib/db';
@@ -52,7 +54,9 @@ import {
   User, 
   MessageSquarePlus, 
   Filter, 
-  Calendar
+  Calendar,
+  Settings,
+  X
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -60,10 +64,15 @@ export default function Dashboard() {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   
+  // Custom global variables/fields
+  const [customFields, setCustomFields] = useState<string[]>([]);
+  const [newFieldName, setNewFieldName] = useState('');
+
   // Modals state
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
   // Form states
   const [formData, setFormData] = useState({
@@ -72,7 +81,8 @@ export default function Dashboard() {
     businessName: '',
     address: '',
     category: 'Medium' as 'High' | 'Medium' | 'Low',
-    initialLog: ''
+    initialLog: '',
+    customValues: {} as Record<string, string>
   });
   
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
@@ -91,9 +101,21 @@ export default function Dashboard() {
     });
   };
 
+  // Fetch custom fields
+  const fetchCustomFields = async () => {
+    const res = await getCustomFields();
+    if (res.success && res.data) {
+      setCustomFields(res.data);
+    }
+  };
+
   useEffect(() => {
     fetchClients();
   }, [search, categoryFilter]);
+
+  useEffect(() => {
+    fetchCustomFields();
+  }, []);
 
   // Load client logs
   const viewLogs = async (clientId: number) => {
@@ -120,7 +142,8 @@ export default function Dashboard() {
       phone: formData.phone,
       businessName: formData.businessName,
       address: formData.address,
-      category: formData.category
+      category: formData.category,
+      customValues: JSON.stringify(formData.customValues)
     }, formData.initialLog);
 
     if (res.success) {
@@ -136,13 +159,20 @@ export default function Dashboard() {
   // Edit client button handler
   const startEdit = (client: Client) => {
     setSelectedClientId(client.id);
+    let parsedValues = {};
+    try {
+      parsedValues = JSON.parse(client.customValues || '{}');
+    } catch {
+      parsedValues = {};
+    }
     setFormData({
       name: client.name,
       phone: client.phone,
       businessName: client.businessName,
       address: client.address,
       category: client.category,
-      initialLog: ''
+      initialLog: '',
+      customValues: parsedValues
     });
     setIsEditOpen(true);
   };
@@ -157,7 +187,8 @@ export default function Dashboard() {
       phone: formData.phone,
       businessName: formData.businessName,
       address: formData.address,
-      category: formData.category
+      category: formData.category,
+      customValues: JSON.stringify(formData.customValues)
     });
 
     if (res.success) {
@@ -206,6 +237,42 @@ export default function Dashboard() {
     }
   };
 
+  // Add global custom field configuration
+  const handleAddCustomField = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = newFieldName.trim();
+    if (!cleanName) return;
+
+    if (customFields.includes(cleanName)) {
+      toast.error('Variabel dengan nama ini sudah ada');
+      return;
+    }
+
+    const updated = [...customFields, cleanName];
+    const res = await saveCustomFields(updated);
+    if (res.success) {
+      setCustomFields(updated);
+      setNewFieldName('');
+      toast.success(`Variabel custom "${cleanName}" ditambahkan`);
+    } else {
+      toast.error(res.error || 'Gagal menambahkan variabel');
+    }
+  };
+
+  // Delete global custom field configuration
+  const handleRemoveCustomField = async (fieldToRemove: string) => {
+    if (confirm(`Apakah Anda yakin ingin menghapus variabel "${fieldToRemove}"? Data tersimpan pada client lama tidak akan hilang, tapi variabel ini tidak akan muncul lagi di input form.`)) {
+      const updated = customFields.filter(f => f !== fieldToRemove);
+      const res = await saveCustomFields(updated);
+      if (res.success) {
+        setCustomFields(updated);
+        toast.success(`Variabel "${fieldToRemove}" berhasil dihapus`);
+      } else {
+        toast.error('Gagal menghapus variabel');
+      }
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       name: '',
@@ -213,7 +280,8 @@ export default function Dashboard() {
       businessName: '',
       address: '',
       category: 'Medium',
-      initialLog: ''
+      initialLog: '',
+      customValues: {}
     });
     setSelectedClientId(null);
   };
@@ -232,9 +300,8 @@ export default function Dashboard() {
   };
 
   const formatDate = (dateStr: string) => {
-    // Add timezone adjustment or simple formatted parsing
     try {
-      const d = new Date(dateStr + 'Z'); // SQLite timestamp defaults to UTC, append Z
+      const d = new Date(dateStr + 'Z');
       return d.toLocaleDateString('id-ID', {
         day: '2-digit',
         month: 'short',
@@ -254,13 +321,24 @@ export default function Dashboard() {
       <header className="flex flex-col gap-1.5 pb-2">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">LeadManager</h1>
-          <Button 
-            size="sm" 
-            className="rounded-full shadow-sm" 
-            onClick={() => { resetForm(); setIsAddOpen(true); }}
-          >
-            <Plus className="h-4 w-4 mr-1" /> Client Baru
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button 
+              variant="outline" 
+              size="icon" 
+              className="rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200" 
+              onClick={() => setIsSettingsOpen(true)}
+              title="Konfigurasi Variabel"
+            >
+              <Settings className="h-4.5 w-4.5" />
+            </Button>
+            <Button 
+              size="sm" 
+              className="rounded-full shadow-sm" 
+              onClick={() => { resetForm(); setIsAddOpen(true); }}
+            >
+              <Plus className="h-4 w-4 mr-1" /> Client Baru
+            </Button>
+          </div>
         </div>
         <p className="text-xs text-slate-500">
           Kelola data calon client Software House dengan mudah.
@@ -325,81 +403,106 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {clients.map((client) => (
-            <Card key={client.id} className="border border-slate-100 shadow-sm rounded-2xl bg-white hover:shadow-md transition-shadow">
-              <CardHeader className="p-4 pb-2.5 flex flex-row items-start justify-between gap-4 space-y-0">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-slate-900 text-base">{client.name}</span>
-                    {getCategoryBadge(client.category)}
+            {clients.map((client) => {
+              // Parse custom fields if any
+              let customValuesObj: Record<string, string> = {};
+              try {
+                customValuesObj = JSON.parse(client.customValues || '{}');
+              } catch {}
+              const filledCustoms = Object.entries(customValuesObj).filter(([_, val]) => val.trim());
+
+              return (
+                <Card key={client.id} className="border border-slate-100 shadow-sm rounded-2xl bg-white hover:shadow-md transition-all flex flex-col justify-between">
+                  <div>
+                    <CardHeader className="p-4 pb-2.5 flex flex-row items-start justify-between gap-4 space-y-0">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-slate-900 text-base">{client.name}</span>
+                          {getCategoryBadge(client.category)}
+                        </div>
+                        <CardDescription className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
+                          <Building2 className="h-3.5 w-3.5 text-slate-400" /> {client.businessName}
+                        </CardDescription>
+                      </div>
+                    </CardHeader>
+                    
+                    <CardContent className="px-4 py-0 pb-3 text-xs space-y-2 text-slate-500">
+                      <div className="flex items-center gap-2">
+                        <Phone className="h-3.5 w-3.5 text-slate-400" />
+                        <a href={`tel:${client.phone}`} className="hover:underline text-slate-600 font-mono">
+                          {client.phone}
+                        </a>
+                      </div>
+                      {client.address && (
+                        <div className="flex items-start gap-2">
+                          <MapPin className="h-3.5 w-3.5 text-slate-400 mt-0.5" />
+                          <span className="leading-relaxed">{client.address}</span>
+                        </div>
+                      )}
+
+                      {/* Display Custom Fields */}
+                      {filledCustoms.length > 0 && (
+                        <div className="pt-2 border-t border-slate-100/80 mt-2 flex flex-col gap-1">
+                          {filledCustoms.map(([label, val]) => (
+                            <div key={label} className="flex justify-between items-center text-[10px] bg-slate-50 border border-slate-100/50 p-1 px-2 rounded-lg">
+                              <span className="font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
+                              <span className="text-slate-700 font-medium">{val}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
                   </div>
-                  <CardDescription className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
-                    <Building2 className="h-3.5 w-3.5 text-slate-400" /> {client.businessName}
-                  </CardDescription>
-                </div>
-              </CardHeader>
-              <CardContent className="px-4 py-0 pb-3 text-xs space-y-2 text-slate-500">
-                <div className="flex items-center gap-2">
-                  <Phone className="h-3.5 w-3.5 text-slate-400" />
-                  <a href={`tel:${client.phone}`} className="hover:underline text-slate-600 font-mono">
-                    {client.phone}
-                  </a>
-                </div>
-                {client.address && (
-                  <div className="flex items-start gap-2">
-                    <MapPin className="h-3.5 w-3.5 text-slate-400 mt-0.5" />
-                    <span className="leading-relaxed">{client.address}</span>
-                  </div>
-                )}
-              </CardContent>
-              <CardFooter className="px-4 py-3 bg-slate-50/50 rounded-b-2xl border-t border-slate-100/50 flex items-center justify-between">
-                <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                  <Calendar className="h-3 w-3" /> Update: {formatDate(client.updatedAt)}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                    onClick={() => viewLogs(client.id)}
-                    title="Log & Keterangan"
-                  >
-                    <History className="h-4 w-4" />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
-                    onClick={() => startEdit(client)}
-                    title="Edit Data"
-                  >
-                    <Edit3 className="h-4 w-4" />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
-                    onClick={() => handleDelete(client.id)}
-                    title="Hapus"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardFooter>
-            </Card>
-          ))}
+                  
+                  <CardFooter className="px-4 py-3 bg-slate-50/50 rounded-b-2xl border-t border-slate-100/50 flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                      <Calendar className="h-3 w-3" /> Update: {formatDate(client.updatedAt)}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-8 w-8 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                        onClick={() => viewLogs(client.id)}
+                        title="Log & Keterangan"
+                      >
+                        <History className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
+                        onClick={() => startEdit(client)}
+                        title="Edit Data"
+                      >
+                        <Edit3 className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-8 w-8 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
+                        onClick={() => handleDelete(client.id)}
+                        title="Hapus"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </CardFooter>
+                </Card>
+              );
+            })}
           </div>
         )}
       </main>
 
       {/* Footer Branding */}
       <footer className="text-center py-4">
-        <p className="text-[10px] text-slate-400 font-mono">LeadManager v1.0 • SQLite DB</p>
+        <p className="text-[10px] text-slate-400 font-mono">LeadManager v1.1 • SQLite DB</p>
       </footer>
 
       {/* Add Client Dialog */}
       <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-        <DialogContent className="max-w-sm rounded-2xl p-6">
+        <DialogContent className="max-w-sm rounded-2xl p-6 max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-lg">Tambah Client Baru</DialogTitle>
             <DialogDescription className="text-xs">
@@ -466,6 +569,27 @@ export default function Dashboard() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Dynamic Custom Fields Inputs */}
+            {customFields.map((field) => (
+              <div key={field} className="space-y-1.5">
+                <Label htmlFor={`add-custom-${field}`} className="text-xs">{field} (Opsional)</Label>
+                <Input 
+                  id={`add-custom-${field}`}
+                  placeholder={`Masukkan ${field}...`}
+                  value={formData.customValues[field] || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    customValues: {
+                      ...formData.customValues,
+                      [field]: e.target.value
+                    }
+                  })}
+                  className="text-sm"
+                />
+              </div>
+            ))}
+
             <div className="space-y-1.5">
               <Label htmlFor="add-log" className="text-xs">Keterangan / Log Awal</Label>
               <Textarea 
@@ -476,7 +600,7 @@ export default function Dashboard() {
                 className="text-sm resize-none h-20"
               />
             </div>
-            <DialogFooter className="pt-2">
+            <DialogFooter className="pt-2 text-left">
               <Button type="submit" className="w-full text-sm">Simpan Client</Button>
             </DialogFooter>
           </form>
@@ -485,7 +609,7 @@ export default function Dashboard() {
 
       {/* Edit Client Dialog */}
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="max-w-sm rounded-2xl p-6">
+        <DialogContent className="max-w-sm rounded-2xl p-6 max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-lg">Edit Data Client</DialogTitle>
             <DialogDescription className="text-xs">
@@ -552,7 +676,28 @@ export default function Dashboard() {
                 </SelectContent>
               </Select>
             </div>
-            <DialogFooter className="pt-2">
+
+            {/* Dynamic Custom Fields Inputs */}
+            {customFields.map((field) => (
+              <div key={field} className="space-y-1.5">
+                <Label htmlFor={`edit-custom-${field}`} className="text-xs">{field} (Opsional)</Label>
+                <Input 
+                  id={`edit-custom-${field}`}
+                  placeholder={`Masukkan ${field}...`}
+                  value={formData.customValues[field] || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    customValues: {
+                      ...formData.customValues,
+                      [field]: e.target.value
+                    }
+                  })}
+                  className="text-sm"
+                />
+              </div>
+            ))}
+
+            <DialogFooter className="pt-2 text-left">
               <Button type="submit" className="w-full text-sm">Update Client</Button>
             </DialogFooter>
           </form>
@@ -614,6 +759,66 @@ export default function Dashboard() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Settings / Custom Fields Config Dialog */}
+      <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+        <DialogContent className="max-w-sm rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg">Kustomisasi Variabel</DialogTitle>
+            <DialogDescription className="text-xs">
+              Tambahkan atau hapus variabel tambahan yang muncul secara global saat menginput data client.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            
+            {/* Add Custom Field Form */}
+            <form onSubmit={handleAddCustomField} className="space-y-2">
+              <Label htmlFor="new-field" className="text-xs font-semibold text-slate-700">Nama Variabel Baru</Label>
+              <div className="flex gap-2">
+                <Input 
+                  id="new-field"
+                  placeholder="cth. Budget, Timeline, OS Target" 
+                  value={newFieldName}
+                  onChange={(e) => setNewFieldName(e.target.value)}
+                  className="text-sm flex-grow"
+                />
+                <Button type="submit" size="sm" className="text-xs shrink-0">Tambah</Button>
+              </div>
+            </form>
+
+            {/* List of Custom Fields */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-slate-700">Variabel Aktif Global</Label>
+              {customFields.length === 0 ? (
+                <p className="text-xs text-slate-400 italic py-2 text-center bg-slate-50 rounded-lg border border-dashed">
+                  Belum ada variabel kustom aktif.
+                </p>
+              ) : (
+                <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+                  {customFields.map((field) => (
+                    <div key={field} className="flex justify-between items-center p-2 bg-slate-50 border border-slate-100 rounded-lg text-xs">
+                      <span className="font-medium text-slate-700">{field}</span>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-6 w-6 text-slate-400 hover:text-rose-500 rounded-full"
+                        onClick={() => handleRemoveCustomField(field)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+          </div>
+          <DialogFooter className="pt-2">
+            <Button onClick={() => setIsSettingsOpen(false)} className="w-full text-sm" variant="secondary">Tutup</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
