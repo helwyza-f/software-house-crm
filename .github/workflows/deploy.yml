@@ -1,0 +1,35 @@
+name: Deploy to Production Server
+
+on:
+  push:
+    branches:
+      - main # Triggers when you push to main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Copy Files via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: "./*"
+          target: "/home/sh-crm"
+          rm: false # Set to true if you want to clean target folder first, but keep it false to preserve SQLite DB if stored locally (though we use volumes)
+
+      - name: Build and Run Docker Containers via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            cd /home/sh-crm
+            docker compose down --remove-orphans
+            docker compose up -d --build
+            echo "Deployment Completed Successfully!"
