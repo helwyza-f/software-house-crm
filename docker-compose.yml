@@ -13,24 +13,22 @@ services:
     volumes:
       - crm-data:/app/data
     ports:
-      - "8089:3000" # Expose directly on port 8089 of the server host
-
-    # === OPTION: Enable Traefik Reverse Proxy Routing ===
-    # To connect to Traefik, uncomment the lines below, configure your domain, and run docker compose.
-    # networks:
-    #   - traefik-network
-    # labels:
-    #   - "traefik.enable=true"
-    #   - "traefik.http.routers.sh-crm.rule=Host(`crm.yoursoftwarehouse.com`)"
-    #   - "traefik.http.routers.sh-crm.entrypoints=websecure"
-    #   - "traefik.http.routers.sh-crm.tls=true"
-    #   - "traefik.http.routers.sh-crm.tls.certresolver=letsencrypt"
-    #   - "traefik.http.services.sh-crm.loadbalancer.server.port=3000"
+      - "8089:3000" # Keep exposed as fallback
+    networks:
+      - traefik-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-network"
+      - "traefik.http.routers.sh-crm.rule=Host(`crm-dev.ayocuci.id`)"
+      - "traefik.http.routers.sh-crm.entrypoints=websecure"
+      - "traefik.http.routers.sh-crm.tls=true"
+      - "traefik.http.routers.sh-crm.tls.certresolver=letsencrypt"
+      - "traefik.http.services.sh-crm.loadbalancer.server.port=3000"
 
 volumes:
   crm-data:
     driver: local
 
-# networks:
-#   traefik-network:
-#     external: true
+networks:
+  traefik-network:
+    external: true
