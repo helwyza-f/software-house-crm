@@ -11,8 +11,6 @@ services:
       POSTGRES_DB: crm
     volumes:
       - pg-data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432" # Keep internal/external port exposed if needed for backup, or remove if strictly private
 
   sh-crm:
     build:
@@ -25,9 +23,26 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:crm_secure_pass_198@db:5432/crm
       - PORT=3000
+    # Port 3000 is exposed only within the Docker network, Nginx/Caddy will handle public ingress
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: SH-CRM-Proxy
+    restart: always
+    depends_on:
+      - sh-crm
     ports:
-      - "80:3000" # Expose Next.js app directly on standard HTTP port 80
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
 
 volumes:
   pg-data:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
     driver: local
