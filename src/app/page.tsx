@@ -431,7 +431,7 @@ export default function Dashboard() {
             </Button>
           </div>
         </div>
-        <p className="text-xs text-slate-500">
+        <p className="text-sm text-slate-500">
           Kelola data calon client Software House dengan mudah.
         </p>
       </header>
@@ -448,7 +448,7 @@ export default function Dashboard() {
           />
         </div>
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-          <span className="text-xs text-slate-400 flex items-center gap-1 mr-1">
+          <span className="text-sm text-slate-400 flex items-center gap-1 mr-1">
             <Filter className="h-3 w-3" /> Potensi:
           </span>
           {[
@@ -460,7 +460,7 @@ export default function Dashboard() {
             <button
               key={btn.value}
               onClick={() => { setCategoryFilter(btn.value); setPage(1); }}
-              className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all ${
+              className={`text-sm px-3.5 py-1.5 rounded-full font-medium transition-all ${
                 categoryFilter === btn.value
                   ? 'bg-slate-900 text-white shadow-sm'
                   : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-100'
@@ -512,13 +512,13 @@ export default function Dashboard() {
                             <span className="font-semibold text-slate-900 text-base">{client.name}</span>
                             {getCategoryBadge(client.category)}
                           </div>
-                          <CardDescription className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
+                          <CardDescription className="flex items-center gap-1.5 text-sm text-slate-600 font-medium">
                             <Building2 className="h-3.5 w-3.5 text-slate-400" /> {client.businessName}
                           </CardDescription>
                         </div>
                       </CardHeader>
                       
-                      <CardContent className="px-4 py-0 pb-3 text-xs space-y-2 text-slate-500">
+                      <CardContent className="px-4 py-0 pb-3 text-sm space-y-2 text-slate-500">
                         <div className="flex items-center gap-2">
                           <Phone className="h-3.5 w-3.5 text-slate-400" />
                           <a href={`tel:${client.phone}`} className="hover:underline text-slate-600 font-mono">
@@ -536,12 +536,12 @@ export default function Dashboard() {
                         {(client.businessType || client.infoSource) && (
                           <div className="flex items-center gap-1.5 flex-wrap pt-1 mr-4">
                             {client.businessType && (
-                              <Badge variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-[10px] px-1.5 py-0.5 rounded-md font-sans">
+                              <Badge variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-md font-sans">
                                 💼 {client.businessType}
                               </Badge>
                             )}
                             {client.infoSource && (
-                              <Badge variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-[10px] px-1.5 py-0.5 rounded-md font-sans">
+                              <Badge variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-md font-sans">
                                 📢 {client.infoSource}
                               </Badge>
                             )}
@@ -552,7 +552,7 @@ export default function Dashboard() {
                         {filledCustoms.length > 0 && (
                           <div className="pt-2 border-t border-slate-100/80 mt-2 flex flex-col gap-1">
                             {filledCustoms.map(([label, val]) => (
-                              <div key={label} className="flex justify-between items-center text-[10px] bg-slate-50 border border-slate-100/50 p-1 px-2 rounded-lg">
+                              <div key={label} className="flex justify-between items-center text-xs bg-slate-50 border border-slate-100/50 p-1.5 px-2 rounded-lg">
                                 <span className="font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
                                 <span className="text-slate-700 font-medium">{val}</span>
                               </div>
@@ -563,7 +563,7 @@ export default function Dashboard() {
                     </div>
                     
                     <CardFooter className="px-4 py-3 bg-slate-50/50 rounded-b-2xl border-t border-slate-100/50 flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                      <span className="text-xs text-slate-400 flex items-center gap-1">
                         <Calendar className="h-3 w-3" /> Update: {formatDate(client.updatedAt)}
                       </span>
                       <div className="flex items-center gap-1.5">
@@ -646,13 +646,13 @@ export default function Dashboard() {
         <DialogContent className="max-w-sm rounded-2xl p-6 max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-lg">Tambah Client Baru</DialogTitle>
-            <DialogDescription className="text-xs">
+            <DialogDescription className="text-sm">
               Masukkan detail client potensial Anda untuk mulai merekam progress.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label htmlFor="add-name" className="text-xs">Nama Client *</Label>
+              <Label htmlFor="add-name" className="text-sm">Nama Client *</Label>
               <Input 
                 id="add-name"
                 placeholder="cth. Pak Budi" 
@@ -663,7 +663,7 @@ export default function Dashboard() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="add-phone" className="text-xs">No HP (WhatsApp) *</Label>
+              <Label htmlFor="add-phone" className="text-sm">No HP (WhatsApp) *</Label>
               <Input 
                 id="add-phone"
                 placeholder="cth. 081234567890" 
@@ -674,7 +674,7 @@ export default function Dashboard() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="add-business" className="text-xs">Nama Usaha *</Label>
+              <Label htmlFor="add-business" className="text-sm">Nama Usaha *</Label>
               <Input 
                 id="add-business"
                 placeholder="cth. PT Maju Bersama" 
@@ -685,7 +685,7 @@ export default function Dashboard() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="add-address" className="text-xs">Alamat</Label>
+              <Label htmlFor="add-address" className="text-sm">Alamat</Label>
               <Input 
                 id="add-address"
                 placeholder="cth. Jl. Jendral Sudirman No. 10" 
@@ -695,7 +695,7 @@ export default function Dashboard() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="add-businessType" className="text-xs">Jenis Usaha</Label>
+              <Label htmlFor="add-businessType" className="text-sm">Jenis Usaha</Label>
               <Select 
                 value={formData.businessType} 
                 onValueChange={(val) => setFormData({ ...formData, businessType: val || '' })}
@@ -711,7 +711,7 @@ export default function Dashboard() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="add-infoSource" className="text-xs">Sumber Informasi</Label>
+              <Label htmlFor="add-infoSource" className="text-sm">Sumber Informasi</Label>
               <Select 
                 value={formData.infoSource} 
                 onValueChange={(val) => setFormData({ ...formData, infoSource: val || '' })}
@@ -727,7 +727,7 @@ export default function Dashboard() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="add-category" className="text-xs">Kategori Potensi</Label>
+              <Label htmlFor="add-category" className="text-sm">Kategori Potensi</Label>
               <Select 
                 value={formData.category} 
                 onValueChange={(val) => { if (val) setFormData({ ...formData, category: val as 'High' | 'Medium' | 'Low' }); }}
@@ -746,7 +746,7 @@ export default function Dashboard() {
             {/* Dynamic Custom Fields Inputs */}
             {customFields.map((field) => (
               <div key={field} className="space-y-1.5">
-                <Label htmlFor={`add-custom-${field}`} className="text-xs">{field} (Opsional)</Label>
+                <Label htmlFor={`add-custom-${field}`} className="text-sm">{field} (Opsional)</Label>
                 <Input 
                   id={`add-custom-${field}`}
                   placeholder={`Masukkan ${field}...`}
@@ -764,7 +764,7 @@ export default function Dashboard() {
             ))}
 
             <div className="space-y-1.5">
-              <Label htmlFor="add-log" className="text-xs">Keterangan / Log Awal</Label>
+              <Label htmlFor="add-log" className="text-sm">Keterangan / Log Awal</Label>
               <Textarea 
                 id="add-log"
                 placeholder="cth. Butuh website e-commerce & aplikasi android, budget sekitar 50jt..." 
@@ -785,13 +785,13 @@ export default function Dashboard() {
         <DialogContent className="max-w-sm rounded-2xl p-6 max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-lg">Edit Data Client</DialogTitle>
-            <DialogDescription className="text-xs">
+            <DialogDescription className="text-sm">
               Perbarui detail client yang dipilih di bawah ini.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleUpdate} className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label htmlFor="edit-name" className="text-xs">Nama Client *</Label>
+              <Label htmlFor="edit-name" className="text-sm">Nama Client *</Label>
               <Input 
                 id="edit-name"
                 placeholder="Nama Client" 
@@ -802,7 +802,7 @@ export default function Dashboard() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="edit-phone" className="text-xs">No HP *</Label>
+              <Label htmlFor="edit-phone" className="text-sm">No HP *</Label>
               <Input 
                 id="edit-phone"
                 placeholder="No HP" 
@@ -813,7 +813,7 @@ export default function Dashboard() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="edit-business" className="text-xs">Nama Usaha *</Label>
+              <Label htmlFor="edit-business" className="text-sm">Nama Usaha *</Label>
               <Input 
                 id="edit-business"
                 placeholder="Nama Usaha" 
@@ -824,7 +824,7 @@ export default function Dashboard() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="edit-address" className="text-xs">Alamat</Label>
+              <Label htmlFor="edit-address" className="text-sm">Alamat</Label>
               <Input 
                 id="edit-address"
                 placeholder="Alamat" 
@@ -834,7 +834,7 @@ export default function Dashboard() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="edit-businessType" className="text-xs">Jenis Usaha</Label>
+              <Label htmlFor="edit-businessType" className="text-sm">Jenis Usaha</Label>
               <Select 
                 value={formData.businessType} 
                 onValueChange={(val) => setFormData({ ...formData, businessType: val || '' })}
@@ -850,7 +850,7 @@ export default function Dashboard() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="edit-infoSource" className="text-xs">Sumber Informasi</Label>
+              <Label htmlFor="edit-infoSource" className="text-sm">Sumber Informasi</Label>
               <Select 
                 value={formData.infoSource} 
                 onValueChange={(val) => setFormData({ ...formData, infoSource: val || '' })}
@@ -866,7 +866,7 @@ export default function Dashboard() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="edit-category" className="text-xs">Kategori Potensi</Label>
+              <Label htmlFor="edit-category" className="text-sm">Kategori Potensi</Label>
               <Select 
                 value={formData.category} 
                 onValueChange={(val) => { if (val) setFormData({ ...formData, category: val as 'High' | 'Medium' | 'Low' }); }}
@@ -885,7 +885,7 @@ export default function Dashboard() {
             {/* Dynamic Custom Fields Inputs */}
             {customFields.map((field) => (
               <div key={field} className="space-y-1.5">
-                <Label htmlFor={`edit-custom-${field}`} className="text-xs">{field} (Opsional)</Label>
+                <Label htmlFor={`edit-custom-${field}`} className="text-sm">{field} (Opsional)</Label>
                 <Input 
                   id={`edit-custom-${field}`}
                   placeholder={`Masukkan ${field}...`}
