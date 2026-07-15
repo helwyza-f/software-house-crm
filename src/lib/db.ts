@@ -1,7 +1,5 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { Pool } from 'pg';
 
-// Define types
 export interface Client {
   id: number;
   name: string;
@@ -21,64 +19,68 @@ export interface ClientLog {
   createdAt: string;
 }
 
-const dbPath = process.env.DATABASE_PATH || path.resolve(process.cwd(), 'clients.db');
+// PostgreSQL connection string
+const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/crm';
 
 declare global {
   // eslint-disable-next-line no-var
-  var _sqliteDb: Database.Database | undefined;
+  var _pgPool: Pool | undefined;
 }
 
-let db: Database.Database;
+let pool: Pool;
 
 if (process.env.NODE_ENV === 'production') {
-  db = new Database(dbPath);
+  pool = new Pool({ connectionString });
 } else {
-  if (!globalThis._sqliteDb) {
-    globalThis._sqliteDb = new Database(dbPath);
+  if (!globalThis._pgPool) {
+    globalThis._pgPool = new Pool({ connectionString });
   }
-  db = globalThis._sqliteDb;
+  pool = globalThis._pgPool;
 }
-
-// Enable foreign keys
-db.pragma('foreign_keys = ON');
 
 // Initialize database schema
-db.exec(`
-  CREATE TABLE IF NOT EXISTS clients (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    phone TEXT NOT NULL,
-    businessName TEXT NOT NULL,
-    address TEXT NOT NULL,
-    category TEXT NOT NULL CHECK(category IN ('High', 'Medium', 'Low')),
-    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+const initDb = async () => {
+  const client = await pool.connect();
+  try {
+    // We use quoted column names to preserve camelCase for TypeScript compatibility
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS clients (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        phone VARCHAR(50) NOT NULL,
+        "businessName" VARCHAR(255) NOT NULL,
+        address TEXT NOT NULL,
+        category VARCHAR(50) NOT NULL CHECK(category IN ('High', 'Medium', 'Low')),
+        "customValues" TEXT DEFAULT '{}',
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
 
-  CREATE TABLE IF NOT EXISTS client_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    clientId INTEGER NOT NULL,
-    logText TEXT NOT NULL,
-    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (clientId) REFERENCES clients (id) ON DELETE CASCADE
-  );
+      CREATE TABLE IF NOT EXISTS client_logs (
+        id SERIAL PRIMARY KEY,
+        "clientId" INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        "logText" TEXT NOT NULL,
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
 
-  CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-  );
+      CREATE TABLE IF NOT EXISTS settings (
+        key VARCHAR(255) PRIMARY KEY,
+        value TEXT
+      );
 
-  CREATE INDEX IF NOT EXISTS idx_clients_category ON clients(category);
-  CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
-  CREATE INDEX IF NOT EXISTS idx_clients_businessName ON clients(businessName);
-  CREATE INDEX IF NOT EXISTS idx_client_logs_clientId ON client_logs(clientId);
-`);
+      CREATE INDEX IF NOT EXISTS idx_clients_category ON clients(category);
+      CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
+      CREATE INDEX IF NOT EXISTS idx_clients_businessName ON clients("businessName");
+      CREATE INDEX IF NOT EXISTS idx_client_logs_clientId ON client_logs("clientId");
+    `);
+  } catch (err) {
+    console.error('Failed to initialize PostgreSQL database schema:', err);
+  } finally {
+    client.release();
+  }
+};
 
-// Migration: Add customValues column to clients if it doesn't exist
-try {
-  db.exec("ALTER TABLE clients ADD COLUMN customValues TEXT DEFAULT '{}';");
-} catch {
-  // Column already exists, ignore error
-}
+// Run database migrations/initialization
+initDb();
 
-export { db };
+export { pool };

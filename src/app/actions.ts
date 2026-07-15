@@ -1,6 +1,6 @@
 'use server';
 
-import { db, Client, ClientLog } from '@/lib/db';
+import { pool, Client, ClientLog } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 
 export interface ClientWithLogs extends Client {
@@ -11,28 +11,32 @@ export async function getClients(search = '', category = '', page = 1, limit = 1
   try {
     let whereClause = ' WHERE 1=1';
     const params: (string | number)[] = [];
+    let pCount = 1;
 
     if (search.trim()) {
-      whereClause += ' AND (name LIKE ? OR businessName LIKE ? OR phone LIKE ? OR address LIKE ?)';
+      whereClause += ` AND (name ILIKE $${pCount} OR "businessName" ILIKE $${pCount + 1} OR phone ILIKE $${pCount + 2} OR address ILIKE $${pCount + 3})`;
       const searchParam = `%${search.trim()}%`;
       params.push(searchParam, searchParam, searchParam, searchParam);
+      pCount += 4;
     }
 
     if (category && category !== 'ALL') {
-      whereClause += ' AND category = ?';
+      whereClause += ` AND category = $${pCount}`;
       params.push(category);
+      pCount += 1;
     }
 
     // Get total count for pagination
-    const countStmt = db.prepare(`SELECT COUNT(*) as count FROM clients${whereClause}`);
-    const totalResult = countStmt.get(...params) as { count: number };
-    const total = totalResult.count;
+    const countRes = await pool.query(`SELECT COUNT(*) as count FROM clients${whereClause}`, params);
+    const total = parseInt(countRes.rows[0].count, 10);
 
     // Fetch paginated records
     const offset = (page - 1) * limit;
-    const query = `SELECT * FROM clients${whereClause} ORDER BY updatedAt DESC LIMIT ? OFFSET ?`;
-    const stmt = db.prepare(query);
-    const clients = stmt.all(...params, limit, offset) as Client[];
+    params.push(limit, offset);
+    const query = `SELECT * FROM clients${whereClause} ORDER BY "updatedAt" DESC LIMIT $${pCount} OFFSET $${pCount + 1}`;
+    
+    const res = await pool.query(query, params);
+    const clients = res.rows as Client[];
 
     return { 
       success: true, 
@@ -51,15 +55,15 @@ export async function getClients(search = '', category = '', page = 1, limit = 1
 
 export async function getClientWithLogs(id: number) {
   try {
-    const clientStmt = db.prepare('SELECT * FROM clients WHERE id = ?');
-    const client = clientStmt.get(id) as Client | undefined;
+    const clientRes = await pool.query('SELECT * FROM clients WHERE id = $1', [id]);
+    const client = clientRes.rows[0] as Client | undefined;
 
     if (!client) {
       return { success: false, error: 'Client not found' };
     }
 
-    const logsStmt = db.prepare('SELECT * FROM client_logs WHERE clientId = ? ORDER BY createdAt DESC');
-    const logs = logsStmt.all(id) as ClientLog[];
+    const logsRes = await pool.query('SELECT * FROM client_logs WHERE "clientId" = $1 ORDER BY "createdAt" DESC', [id]);
+    const logs = logsRes.rows as ClientLog[];
 
     return { success: true, data: { ...client, logs } as ClientWithLogs };
   } catch (error) {
@@ -79,36 +83,44 @@ export async function createClient(
   },
   initialLog?: string
 ) {
+  const dbClient = await pool.connect();
   try {
-    const transaction = db.transaction(() => {
-      const clientStmt = db.prepare(`
-        INSERT INTO clients (name, phone, businessName, address, category, customValues, createdAt, updatedAt)
-        VALUES (@name, @phone, @businessName, @address, @category, @customValues, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `);
-      
-      const result = clientStmt.run({
-        ...clientData,
-        customValues: clientData.customValues || '{}'
-      });
-      const clientId = result.lastInsertRowid as number;
+    await dbClient.query('BEGIN');
 
-      if (initialLog && initialLog.trim()) {
-        const logStmt = db.prepare(`
-          INSERT INTO client_logs (clientId, logText, createdAt)
-          VALUES (?, ?, CURRENT_TIMESTAMP)
-        `);
-        logStmt.run(clientId, initialLog.trim());
-      }
+    const clientQuery = `
+      INSERT INTO clients (name, phone, "businessName", address, category, "customValues", "createdAt", "updatedAt")
+      VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      RETURNING id
+    `;
+    const clientParams = [
+      clientData.name,
+      clientData.phone,
+      clientData.businessName,
+      clientData.address,
+      clientData.category,
+      clientData.customValues || '{}'
+    ];
+    
+    const clientRes = await dbClient.query(clientQuery, clientParams);
+    const clientId = clientRes.rows[0].id as number;
 
-      return clientId;
-    });
+    if (initialLog && initialLog.trim()) {
+      const logQuery = `
+        INSERT INTO client_logs ("clientId", "logText", "createdAt")
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
+      `;
+      await dbClient.query(logQuery, [clientId, initialLog.trim()]);
+    }
 
-    const clientId = transaction();
+    await dbClient.query('COMMIT');
     revalidatePath('/');
     return { success: true, data: { id: clientId } };
   } catch (error) {
+    await dbClient.query('ROLLBACK');
     console.error('Error creating client:', error);
     return { success: false, error: 'Failed to create client' };
+  } finally {
+    dbClient.release();
   }
 }
 
@@ -124,15 +136,24 @@ export async function updateClient(
   }
 ) {
   try {
-    const stmt = db.prepare(`
+    const query = `
       UPDATE clients
-      SET name = @name, phone = @phone, businessName = @businessName, address = @address, category = @category, customValues = @customValues, updatedAt = CURRENT_TIMESTAMP
-      WHERE id = @id
-    `);
+      SET name = $1, phone = $2, "businessName" = $3, address = $4, category = $5, "customValues" = $6, "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $7
+    `;
+    const params = [
+      clientData.name,
+      clientData.phone,
+      clientData.businessName,
+      clientData.address,
+      clientData.category,
+      clientData.customValues || '{}',
+      id
+    ];
+
+    const result = await pool.query(query, params);
     
-    const result = stmt.run({ ...clientData, customValues: clientData.customValues || '{}', id });
-    
-    if (result.changes === 0) {
+    if (result.rowCount === 0) {
       return { success: false, error: 'Client not found or no changes made' };
     }
 
@@ -146,9 +167,7 @@ export async function updateClient(
 
 export async function deleteClient(id: number) {
   try {
-    const stmt = db.prepare('DELETE FROM clients WHERE id = ?');
-    stmt.run(id);
-    
+    await pool.query('DELETE FROM clients WHERE id = $1', [id]);
     revalidatePath('/');
     return { success: true };
   } catch (error) {
@@ -158,32 +177,37 @@ export async function deleteClient(id: number) {
 }
 
 export async function addClientLog(clientId: number, logText: string) {
+  const dbClient = await pool.connect();
   try {
-    const transaction = db.transaction(() => {
-      const logStmt = db.prepare(`
-        INSERT INTO client_logs (clientId, logText, createdAt)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-      `);
-      logStmt.run(clientId, logText.trim());
+    await dbClient.query('BEGIN');
 
-      const updateClientStmt = db.prepare(`
-        UPDATE clients SET updatedAt = CURRENT_TIMESTAMP WHERE id = ?
-      `);
-      updateClientStmt.run(clientId);
-    });
+    const logQuery = `
+      INSERT INTO client_logs ("clientId", "logText", "createdAt")
+      VALUES ($1, $2, CURRENT_TIMESTAMP)
+    `;
+    await dbClient.query(logQuery, [clientId, logText.trim()]);
 
-    transaction();
+    const updateQuery = `
+      UPDATE clients SET "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1
+    `;
+    await dbClient.query(updateQuery, [clientId]);
+
+    await dbClient.query('COMMIT');
     revalidatePath('/');
     return { success: true };
   } catch (error) {
+    await dbClient.query('ROLLBACK');
     console.error('Error adding log:', error);
     return { success: false, error: 'Failed to add log' };
+  } finally {
+    dbClient.release();
   }
 }
+
 export async function getCustomFields() {
   try {
-    const stmt = db.prepare("SELECT value FROM settings WHERE key = 'custom_fields'");
-    const row = stmt.get() as { value: string } | undefined;
+    const res = await pool.query("SELECT value FROM settings WHERE key = 'custom_fields'");
+    const row = res.rows[0] as { value: string } | undefined;
     if (!row) {
       return { success: true, data: [] as string[] };
     }
@@ -197,12 +221,12 @@ export async function getCustomFields() {
 
 export async function saveCustomFields(fields: string[]) {
   try {
-    const stmt = db.prepare(`
+    const query = `
       INSERT INTO settings (key, value)
-      VALUES ('custom_fields', ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `);
-    stmt.run(JSON.stringify(fields));
+      VALUES ('custom_fields', $1)
+      ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+    `;
+    await pool.query(query, [JSON.stringify(fields)]);
     revalidatePath('/');
     return { success: true };
   } catch (error) {

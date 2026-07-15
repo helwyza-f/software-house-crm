@@ -1,34 +1,33 @@
 version: '3.8'
 
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: SH-CRM-Db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: crm_secure_pass_198
+      POSTGRES_DB: crm
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432" # Keep internal/external port exposed if needed for backup, or remove if strictly private
+
   sh-crm:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: SH-CRM-App
     restart: always
+    depends_on:
+      - db
     environment:
-      - DATABASE_PATH=/app/data/clients.db
+      - DATABASE_URL=postgresql://postgres:crm_secure_pass_198@db:5432/crm
       - PORT=3000
-    volumes:
-      - crm-data:/app/data
     ports:
-      - "8089:3000" # Keep exposed as fallback
-    networks:
-      - traefik-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=traefik-network"
-      - "traefik.http.routers.sh-crm.rule=Host(`crm-dev.ayocuci.id`)"
-      - "traefik.http.routers.sh-crm.entrypoints=websecure"
-      - "traefik.http.routers.sh-crm.tls=true"
-      - "traefik.http.routers.sh-crm.tls.certresolver=letsencrypt"
-      - "traefik.http.services.sh-crm.loadbalancer.server.port=3000"
+      - "80:3000" # Expose Next.js app directly on standard HTTP port 80
 
 volumes:
-  crm-data:
+  pg-data:
     driver: local
-
-networks:
-  traefik-network:
-    external: true

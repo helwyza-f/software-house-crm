@@ -1,13 +1,9 @@
 FROM node:20-alpine
 
-# Install build dependencies for native modules (better-sqlite3)
-RUN apk add --no-cache python3 make g++ gcc libc-dev
-
 WORKDIR /app
 
 COPY package*.json ./
 
-# Install dependencies (recompiles better-sqlite3 for Alpine target)
 RUN npm install
 
 # Copy application source
