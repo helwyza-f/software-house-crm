@@ -1,4 +1,4 @@
-:80, :443 {
+crm.bidtech.co.id, 212.85.26.8 {
     reverse_proxy sh-crm:3000
     tls internal
 }
