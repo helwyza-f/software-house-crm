@@ -4,54 +4,18 @@ import React, { useState, useEffect, startTransition } from 'react';
 import { 
   getClients, 
   getClientWithLogs, 
-  createClient, 
-  updateClient, 
   deleteClient, 
   addClientLog,
   getCustomFields,
-  saveCustomFields,
-  getGlobalOptions,
-  addGlobalOption,
-  deleteGlobalOption,
   ClientWithLogs
 } from './actions';
 import { Client } from '@/lib/db';
-import { 
-  Card, 
-  CardContent, 
-  CardDescription, 
-  CardFooter, 
-  CardHeader, 
-  CardTitle 
-} from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@/components/ui/card';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogDescription, 
-  DialogFooter, 
-  DialogHeader, 
-  DialogTitle 
-} from '@/components/ui/dialog';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from '@/components/ui/select';
-import { 
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from '@/components/ui/alert-dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -69,10 +33,10 @@ import {
   Filter, 
   Calendar,
   Settings,
-  X,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
+import Link from 'next/link';
 
 export default function Dashboard() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -86,38 +50,16 @@ export default function Dashboard() {
   const [totalClients, setTotalClients] = useState(0);
   const itemsPerPage = 12;
 
-  // Custom global variables/fields
+  // Custom global variables/fields list
   const [customFields, setCustomFields] = useState<string[]>([]);
-  const [newFieldName, setNewFieldName] = useState('');
 
   // Modals state
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [isEditOpen, setIsEditOpen] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [deleteClientId, setDeleteClientId] = useState<number | null>(null);
-  
-  // Form states
-  const [formData, setFormData] = useState({
-    name: '',
-    phone: '',
-    businessName: '',
-    address: '',
-    category: 'Medium' as 'High' | 'Medium' | 'Low',
-    businessType: '',
-    infoSource: '',
-    initialLog: '',
-    customValues: {} as Record<string, string>
-  });
   
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [selectedClientData, setSelectedClientData] = useState<ClientWithLogs | null>(null);
   const [newLogText, setNewLogText] = useState('');
-
-  // Global dynamic dropdown options state
-  const [globalOptions, setGlobalOptions] = useState<{ businessTypes: string[], infoSources: string[] }>({ businessTypes: [], infoSources: [] });
-  const [newBusinessType, setNewBusinessType] = useState('');
-  const [newInfoSource, setNewInfoSource] = useState('');
 
   // Search Debounce Effect
   useEffect(() => {
@@ -142,7 +84,7 @@ export default function Dashboard() {
     });
   };
 
-  // Fetch custom fields
+  // Fetch custom fields list
   const fetchCustomFields = async () => {
     const res = await getCustomFields();
     if (res.success && res.data) {
@@ -154,16 +96,8 @@ export default function Dashboard() {
     fetchClients();
   }, [debouncedSearch, categoryFilter, page]);
 
-  const fetchGlobalOptions = async () => {
-    const res = await getGlobalOptions();
-    if (res.success && res.data) {
-      setGlobalOptions(res.data);
-    }
-  };
-
   useEffect(() => {
     fetchCustomFields();
-    fetchGlobalOptions();
   }, []);
 
   // Load client logs
@@ -175,84 +109,6 @@ export default function Dashboard() {
       setIsLogsOpen(true);
     } else {
       toast.error(res.error || 'Gagal memuat log client');
-    }
-  };
-
-  // Create client handler
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.name || !formData.phone || !formData.businessName) {
-      toast.error('Nama, No HP, dan Nama Usaha wajib diisi');
-      return;
-    }
-
-    const res = await createClient({
-      name: formData.name,
-      phone: formData.phone,
-      businessName: formData.businessName,
-      address: formData.address,
-      category: formData.category,
-      businessType: formData.businessType,
-      infoSource: formData.infoSource,
-      customValues: JSON.stringify(formData.customValues)
-    }, formData.initialLog);
-
-    if (res.success) {
-      toast.success('Client baru berhasil didaftarkan');
-      setIsAddOpen(false);
-      resetForm();
-      fetchClients();
-    } else {
-      toast.error(res.error || 'Gagal menambahkan client');
-    }
-  };
-
-  // Edit client button handler
-  const startEdit = (client: Client) => {
-    setSelectedClientId(client.id);
-    let parsedValues = {};
-    try {
-      parsedValues = JSON.parse(client.customValues || '{}');
-    } catch {
-      parsedValues = {};
-    }
-    setFormData({
-      name: client.name,
-      phone: client.phone,
-      businessName: client.businessName,
-      address: client.address,
-      category: client.category,
-      businessType: client.businessType || '',
-      infoSource: client.infoSource || '',
-      initialLog: '',
-      customValues: parsedValues
-    });
-    setIsEditOpen(true);
-  };
-
-  // Update client handler
-  const handleUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedClientId) return;
-
-    const res = await updateClient(selectedClientId, {
-      name: formData.name,
-      phone: formData.phone,
-      businessName: formData.businessName,
-      address: formData.address,
-      category: formData.category,
-      businessType: formData.businessType,
-      infoSource: formData.infoSource,
-      customValues: JSON.stringify(formData.customValues)
-    });
-
-    if (res.success) {
-      toast.success('Data client berhasil diupdate');
-      setIsEditOpen(false);
-      resetForm();
-      fetchClients();
-    } else {
-      toast.error(res.error || 'Gagal mengupdate client');
     }
   };
 
@@ -291,92 +147,6 @@ export default function Dashboard() {
     }
   };
 
-  // Add global custom field configuration
-  const handleAddCustomField = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanName = newFieldName.trim();
-    if (!cleanName) return;
-
-    if (customFields.includes(cleanName)) {
-      toast.error('Variabel dengan nama ini sudah ada');
-      return;
-    }
-
-    const updated = [...customFields, cleanName];
-    const res = await saveCustomFields(updated);
-    if (res.success) {
-      setCustomFields(updated);
-      setNewFieldName('');
-      toast.success(`Variabel custom "${cleanName}" ditambahkan`);
-    } else {
-      toast.error(res.error || 'Gagal menambahkan variabel');
-    }
-  };
-
-  // Delete global custom field configuration
-  const handleRemoveCustomField = async (fieldToRemove: string) => {
-    if (confirm(`Apakah Anda yakin ingin menghapus variabel "${fieldToRemove}"? Data tersimpan pada client lama tidak akan hilang, tapi variabel ini tidak akan muncul lagi di input form.`)) {
-      const updated = customFields.filter(f => f !== fieldToRemove);
-      const res = await saveCustomFields(updated);
-      if (res.success) {
-        setCustomFields(updated);
-        toast.success(`Variabel "${fieldToRemove}" berhasil dihapus`);
-      } else {
-        toast.error('Gagal menghapus variabel');
-      }
-    }
-  };
-
-  // Manage dropdown options settings
-  const handleAddOption = async (e: React.FormEvent, type: 'businessType' | 'infoSource') => {
-    e.preventDefault();
-    const value = type === 'businessType' ? newBusinessType.trim() : newInfoSource.trim();
-    if (!value) return;
-
-    const res = await addGlobalOption(type, value);
-    if (res.success) {
-      if (type === 'businessType') {
-        setGlobalOptions(prev => ({ ...prev, businessTypes: res.data || [] }));
-        setNewBusinessType('');
-      } else {
-        setGlobalOptions(prev => ({ ...prev, infoSources: res.data || [] }));
-        setNewInfoSource('');
-      }
-      toast.success(`Opsi "${value}" berhasil ditambahkan`);
-    } else {
-      toast.error(res.error || 'Gagal menambahkan opsi');
-    }
-  };
-
-  const handleDeleteOption = async (type: 'businessType' | 'infoSource', value: string) => {
-    const res = await deleteGlobalOption(type, value);
-    if (res.success) {
-      if (type === 'businessType') {
-        setGlobalOptions(prev => ({ ...prev, businessTypes: res.data || [] }));
-      } else {
-        setGlobalOptions(prev => ({ ...prev, infoSources: res.data || [] }));
-      }
-      toast.success(`Opsi "${value}" berhasil dihapus`);
-    } else {
-      toast.error(res.error || 'Gagal menghapus opsi');
-    }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      phone: '',
-      businessName: '',
-      address: '',
-      category: 'Medium',
-      businessType: '',
-      infoSource: '',
-      initialLog: '',
-      customValues: {}
-    });
-    setSelectedClientId(null);
-  };
-
   const getCategoryBadge = (category: string) => {
     switch (category) {
       case 'High':
@@ -413,22 +183,19 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">LeadManager</h1>
           <div className="flex items-center gap-1.5">
-            <Button 
-              variant="outline" 
-              size="icon" 
-              className="rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200" 
-              onClick={() => setIsSettingsOpen(true)}
+            <Link 
+              href="/settings" 
               title="Konfigurasi Variabel"
+              className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
             >
               <Settings className="h-4.5 w-4.5" />
-            </Button>
-            <Button 
-              size="sm" 
-              className="rounded-full shadow-sm" 
-              onClick={() => { resetForm(); setIsAddOpen(true); }}
+            </Link>
+            <Link 
+              href="/add"
+              className={buttonVariants({ variant: 'default', size: 'sm', className: 'rounded-full shadow-sm text-sm' })}
             >
               <Plus className="h-4 w-4 mr-1" /> Client Baru
-            </Button>
+            </Link>
           </div>
         </div>
         <p className="text-sm text-slate-500">
@@ -478,25 +245,22 @@ export default function Dashboard() {
           <div className="flex flex-col items-center justify-center py-12 px-4 border border-dashed border-slate-200 rounded-2xl bg-white text-center gap-3 max-w-md mx-auto w-full">
             <User className="h-10 w-10 text-slate-300" />
             <div className="space-y-1">
-              <p className="text-sm font-medium text-slate-700">Belum ada data client</p>
-              <p className="text-xs text-slate-400 max-w-[240px]">
-                Tambahkan client potensial pertama Anda untuk mulai mencatat.
+              <h3 className="font-semibold text-slate-900 text-sm">Belum ada client</h3>
+              <p className="text-xs text-slate-500">
+                Tidak ada data client potensial ditemukan. Silakan tambahkan data baru.
               </p>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="mt-1 text-xs" 
-              onClick={() => { resetForm(); setIsAddOpen(true); }}
+            <Link 
+              href="/add"
+              className={buttonVariants({ variant: 'default', size: 'sm', className: 'rounded-xl text-sm' })}
             >
-              Tambah Client
-            </Button>
+              <Plus className="h-3.5 w-3.5 mr-1" /> Tambah Client
+            </Link>
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {clients.map((client) => {
-                // Parse custom fields if any
                 let customValuesObj: Record<string, string> = {};
                 try {
                   customValuesObj = JSON.parse(client.customValues || '{}');
@@ -576,15 +340,13 @@ export default function Dashboard() {
                         >
                           <History className="h-4 w-4" />
                         </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
-                          onClick={() => startEdit(client)}
+                        <Link 
+                          href={`/edit/${client.id}`}
+                          className={buttonVariants({ variant: 'ghost', size: 'icon', className: 'h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg' })}
                           title="Edit Data"
                         >
                           <Edit3 className="h-4 w-4" />
-                        </Button>
+                        </Link>
                         <Button 
                           variant="ghost" 
                           size="icon" 
@@ -611,7 +373,7 @@ export default function Dashboard() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 rounded-lg"
+                    className="h-8 rounded-lg text-xs"
                     onClick={() => setPage((p) => Math.max(p - 1, 1))}
                     disabled={page === 1}
                   >
@@ -623,7 +385,7 @@ export default function Dashboard() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 rounded-lg"
+                    className="h-8 rounded-lg text-xs"
                     onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
                     disabled={page === totalPages}
                   >
@@ -638,305 +400,33 @@ export default function Dashboard() {
 
       {/* Footer Branding */}
       <footer className="text-center py-4">
-        <p className="text-[10px] text-slate-400 font-mono">LeadManager v1.2 • SQLite DB</p>
+        <p className="text-[10px] text-slate-400 font-mono">LeadManager v1.3 • PostgreSQL DB</p>
       </footer>
 
-      {/* Add Client Dialog */}
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-        <DialogContent className="max-w-sm rounded-2xl p-6 max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-lg">Tambah Client Baru</DialogTitle>
-            <DialogDescription className="text-sm">
-              Masukkan detail client potensial Anda untuk mulai merekam progress.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleCreate} className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="add-name" className="text-sm">Nama Client *</Label>
-              <Input 
-                id="add-name"
-                placeholder="cth. Pak Budi" 
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                required
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="add-phone" className="text-sm">No HP (WhatsApp) *</Label>
-              <Input 
-                id="add-phone"
-                placeholder="cth. 081234567890" 
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                required
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="add-business" className="text-sm">Nama Usaha *</Label>
-              <Input 
-                id="add-business"
-                placeholder="cth. PT Maju Bersama" 
-                value={formData.businessName}
-                onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
-                required
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="add-address" className="text-sm">Alamat</Label>
-              <Input 
-                id="add-address"
-                placeholder="cth. Jl. Jendral Sudirman No. 10" 
-                value={formData.address}
-                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="add-businessType" className="text-sm">Jenis Usaha</Label>
-              <Select 
-                value={formData.businessType} 
-                onValueChange={(val) => setFormData({ ...formData, businessType: val || '' })}
-              >
-                <SelectTrigger id="add-businessType" className="text-sm w-full bg-white">
-                  <SelectValue placeholder="Pilih Jenis Usaha" />
-                </SelectTrigger>
-                <SelectContent>
-                  {globalOptions.businessTypes.map((type) => (
-                    <SelectItem key={type} value={type} className="text-sm">{type}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="add-infoSource" className="text-sm">Sumber Informasi</Label>
-              <Select 
-                value={formData.infoSource} 
-                onValueChange={(val) => setFormData({ ...formData, infoSource: val || '' })}
-              >
-                <SelectTrigger id="add-infoSource" className="text-sm w-full bg-white">
-                  <SelectValue placeholder="Pilih Sumber Informasi" />
-                </SelectTrigger>
-                <SelectContent>
-                  {globalOptions.infoSources.map((source) => (
-                    <SelectItem key={source} value={source} className="text-sm">{source}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="add-category" className="text-sm">Kategori Potensi</Label>
-              <Select 
-                value={formData.category} 
-                onValueChange={(val) => { if (val) setFormData({ ...formData, category: val as 'High' | 'Medium' | 'Low' }); }}
-              >
-                <SelectTrigger id="add-category" className="text-sm w-full">
-                  <SelectValue placeholder="Pilih potensi" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="High" className="text-sm">🔥 High Potential</SelectItem>
-                  <SelectItem value="Medium" className="text-sm">⚡ Medium Potential</SelectItem>
-                  <SelectItem value="Low" className="text-sm">❄️ Low Potential</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Dynamic Custom Fields Inputs */}
-            {customFields.map((field) => (
-              <div key={field} className="space-y-1.5">
-                <Label htmlFor={`add-custom-${field}`} className="text-sm">{field} (Opsional)</Label>
-                <Input 
-                  id={`add-custom-${field}`}
-                  placeholder={`Masukkan ${field}...`}
-                  value={formData.customValues[field] || ''}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    customValues: {
-                      ...formData.customValues,
-                      [field]: e.target.value
-                    }
-                  })}
-                  className="text-sm"
-                />
-              </div>
-            ))}
-
-            <div className="space-y-1.5">
-              <Label htmlFor="add-log" className="text-sm">Keterangan / Log Awal</Label>
-              <Textarea 
-                id="add-log"
-                placeholder="cth. Butuh website e-commerce & aplikasi android, budget sekitar 50jt..." 
-                value={formData.initialLog}
-                onChange={(e) => setFormData({ ...formData, initialLog: e.target.value })}
-                className="text-sm resize-none h-20"
-              />
-            </div>
-            <DialogFooter className="pt-2 text-left">
-              <Button type="submit" className="w-full text-sm">Simpan Client</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Client Dialog */}
-      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="max-w-sm rounded-2xl p-6 max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-lg">Edit Data Client</DialogTitle>
-            <DialogDescription className="text-sm">
-              Perbarui detail client yang dipilih di bawah ini.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleUpdate} className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-name" className="text-sm">Nama Client *</Label>
-              <Input 
-                id="edit-name"
-                placeholder="Nama Client" 
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                required
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-phone" className="text-sm">No HP *</Label>
-              <Input 
-                id="edit-phone"
-                placeholder="No HP" 
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                required
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-business" className="text-sm">Nama Usaha *</Label>
-              <Input 
-                id="edit-business"
-                placeholder="Nama Usaha" 
-                value={formData.businessName}
-                onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
-                required
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-address" className="text-sm">Alamat</Label>
-              <Input 
-                id="edit-address"
-                placeholder="Alamat" 
-                value={formData.address}
-                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-businessType" className="text-sm">Jenis Usaha</Label>
-              <Select 
-                value={formData.businessType} 
-                onValueChange={(val) => setFormData({ ...formData, businessType: val || '' })}
-              >
-                <SelectTrigger id="edit-businessType" className="text-sm w-full bg-white">
-                  <SelectValue placeholder="Pilih Jenis Usaha" />
-                </SelectTrigger>
-                <SelectContent>
-                  {globalOptions.businessTypes.map((type) => (
-                    <SelectItem key={type} value={type} className="text-sm">{type}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-infoSource" className="text-sm">Sumber Informasi</Label>
-              <Select 
-                value={formData.infoSource} 
-                onValueChange={(val) => setFormData({ ...formData, infoSource: val || '' })}
-              >
-                <SelectTrigger id="edit-infoSource" className="text-sm w-full bg-white">
-                  <SelectValue placeholder="Pilih Sumber Informasi" />
-                </SelectTrigger>
-                <SelectContent>
-                  {globalOptions.infoSources.map((source) => (
-                    <SelectItem key={source} value={source} className="text-sm">{source}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-category" className="text-sm">Kategori Potensi</Label>
-              <Select 
-                value={formData.category} 
-                onValueChange={(val) => { if (val) setFormData({ ...formData, category: val as 'High' | 'Medium' | 'Low' }); }}
-              >
-                <SelectTrigger id="edit-category" className="text-sm w-full">
-                  <SelectValue placeholder="Pilih potensi" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="High" className="text-sm">🔥 High Potential</SelectItem>
-                  <SelectItem value="Medium" className="text-sm">⚡ Medium Potential</SelectItem>
-                  <SelectItem value="Low" className="text-sm">❄️ Low Potential</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Dynamic Custom Fields Inputs */}
-            {customFields.map((field) => (
-              <div key={field} className="space-y-1.5">
-                <Label htmlFor={`edit-custom-${field}`} className="text-sm">{field} (Opsional)</Label>
-                <Input 
-                  id={`edit-custom-${field}`}
-                  placeholder={`Masukkan ${field}...`}
-                  value={formData.customValues[field] || ''}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    customValues: {
-                      ...formData.customValues,
-                      [field]: e.target.value
-                    }
-                  })}
-                  className="text-sm"
-                />
-              </div>
-            ))}
-
-            <DialogFooter className="pt-2 text-left">
-              <Button type="submit" className="w-full text-sm">Update Client</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Logs History / Detail Dialog */}
+      {/* Client Interaction Logs Dialog */}
       <Dialog open={isLogsOpen} onOpenChange={setIsLogsOpen}>
-        <DialogContent className="max-w-sm rounded-2xl p-6 flex flex-col max-h-[85vh]">
-          <DialogHeader className="shrink-0">
-            <DialogTitle className="text-lg flex items-center justify-between">
-              <span>Log Aktivitas</span>
-              {selectedClientData && getCategoryBadge(selectedClientData.category)}
-            </DialogTitle>
-            <DialogDescription className="text-xs text-left">
+        <DialogContent className="max-w-md rounded-2xl p-6 max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Log Aktivitas & Keterangan</DialogTitle>
+            <DialogDescription className="text-sm">
               {selectedClientData?.name} ({selectedClientData?.businessName})
             </DialogDescription>
           </DialogHeader>
 
-          {/* Add Log Form */}
-          <form onSubmit={handleAddLog} className="space-y-2 py-2 shrink-0 border-b border-slate-100 pb-4">
-            <Label htmlFor="new-log" className="text-xs font-semibold text-slate-700 flex items-center gap-1">
-              <MessageSquarePlus className="h-3.5 w-3.5" /> Tambah Catatan Baru
-            </Label>
+          {/* Add New Log Form */}
+          <form onSubmit={handleAddLog} className="space-y-2 py-2 shrink-0">
+            <Label htmlFor="new-log" className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tambah Log Aktivitas Baru</Label>
             <div className="flex gap-2">
-              <Input 
+              <Textarea 
                 id="new-log"
-                placeholder="cth. Menghubungi via WA, tertarik follow up minggu depan..." 
+                placeholder="Tulis log aktivitas baru di sini..." 
                 value={newLogText}
                 onChange={(e) => setNewLogText(e.target.value)}
-                required
-                className="text-xs flex-grow"
+                className="text-sm resize-none h-11 py-2 rounded-xl border-slate-200"
               />
-              <Button type="submit" size="sm" className="text-xs shrink-0">Kirim</Button>
+              <Button type="submit" size="sm" className="h-11 px-3 shrink-0 rounded-xl">
+                <MessageSquarePlus className="h-4.5 w-4.5" />
+              </Button>
             </div>
           </form>
 
@@ -954,7 +444,7 @@ export default function Dashboard() {
                     <div className="flex justify-between items-center text-[10px] text-slate-400 font-medium mb-0.5">
                       <span>{formatDate(log.createdAt)}</span>
                     </div>
-                    <p className="text-slate-700 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100/60 font-sans">
+                    <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100/60 font-sans">
                       {log.logText}
                     </p>
                   </div>
@@ -965,144 +455,12 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Settings / Custom Fields Config Dialog */}
-      <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
-        <DialogContent className="max-w-sm rounded-2xl p-6 max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-lg">Kustomisasi CRM</DialogTitle>
-            <DialogDescription className="text-xs">
-              Kelola variabel tambahan dan opsi menu dropdown global secara real-time.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-5 py-2 divide-y divide-slate-100">
-            
-            {/* Section 1: Custom Fields */}
-            <div className="space-y-3 pb-1">
-              <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">⚙️ Variabel Tambahan (Teks)</h3>
-              <form onSubmit={handleAddCustomField} className="space-y-1.5">
-                <Label htmlFor="new-field" className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Nama Variabel Baru</Label>
-                <div className="flex gap-2">
-                  <Input 
-                    id="new-field"
-                    placeholder="cth. Budget, Timeline, OS Target" 
-                    value={newFieldName}
-                    onChange={(e) => setNewFieldName(e.target.value)}
-                    className="text-sm flex-grow h-8"
-                  />
-                  <Button type="submit" size="sm" className="text-xs shrink-0 h-8">Tambah</Button>
-                </div>
-              </form>
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Daftar Variabel Aktif</Label>
-                {customFields.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic py-2 text-center bg-slate-50 rounded-lg border border-dashed">
-                    Belum ada variabel kustom aktif.
-                  </p>
-                ) : (
-                  <div className="max-h-24 overflow-y-auto space-y-1 pr-1 scrollbar-thin">
-                    {customFields.map((field) => (
-                      <div key={field} className="flex justify-between items-center p-1.5 bg-slate-50 border border-slate-100 rounded-lg text-xs">
-                        <span className="font-medium text-slate-700">{field}</span>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-5 w-5 text-slate-400 hover:text-rose-500 rounded-full"
-                          onClick={() => handleRemoveCustomField(field)}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Section 2: Business Type Options */}
-            <div className="space-y-3 pt-3">
-              <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">💼 Opsi Jenis Usaha</h3>
-              <form onSubmit={(e) => handleAddOption(e, 'businessType')} className="space-y-1.5">
-                <Label htmlFor="new-bus-type" className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Tambah Opsi Baru</Label>
-                <div className="flex gap-2">
-                  <Input 
-                    id="new-bus-type"
-                    placeholder="cth. Retail, F&B, Manufacture" 
-                    value={newBusinessType}
-                    onChange={(e) => setNewBusinessType(e.target.value)}
-                    className="text-sm flex-grow h-8"
-                  />
-                  <Button type="submit" size="sm" className="text-xs shrink-0 h-8">Tambah</Button>
-                </div>
-              </form>
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Opsi Aktif</Label>
-                <div className="max-h-24 overflow-y-auto space-y-1 pr-1 scrollbar-thin">
-                  {globalOptions.businessTypes.map((type) => (
-                    <div key={type} className="flex justify-between items-center p-1.5 bg-slate-50 border border-slate-100 rounded-lg text-xs">
-                      <span className="font-medium text-slate-700">{type}</span>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-5 w-5 text-slate-400 hover:text-rose-500 rounded-full"
-                        onClick={() => handleDeleteOption('businessType', type)}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Section 3: Info Source Options */}
-            <div className="space-y-3 pt-3">
-              <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">📢 Opsi Sumber Informasi</h3>
-              <form onSubmit={(e) => handleAddOption(e, 'infoSource')} className="space-y-1.5">
-                <Label htmlFor="new-info-src" className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Tambah Opsi Baru</Label>
-                <div className="flex gap-2">
-                  <Input 
-                    id="new-info-src"
-                    placeholder="cth. TikTok, Banner, Event" 
-                    value={newInfoSource}
-                    onChange={(e) => setNewInfoSource(e.target.value)}
-                    className="text-sm flex-grow h-8"
-                  />
-                  <Button type="submit" size="sm" className="text-xs shrink-0 h-8">Tambah</Button>
-                </div>
-              </form>
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Opsi Aktif</Label>
-                <div className="max-h-24 overflow-y-auto space-y-1 pr-1 scrollbar-thin">
-                  {globalOptions.infoSources.map((source) => (
-                    <div key={source} className="flex justify-between items-center p-1.5 bg-slate-50 border border-slate-100 rounded-lg text-xs">
-                      <span className="font-medium text-slate-700">{source}</span>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-5 w-5 text-slate-400 hover:text-rose-500 rounded-full"
-                        onClick={() => handleDeleteOption('infoSource', source)}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-          </div>
-          <DialogFooter className="pt-2 mt-3">
-            <Button onClick={() => setIsSettingsOpen(false)} className="w-full text-sm" variant="secondary">Tutup</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Shadcn AlertDialog for Delete Confirmation */}
       <AlertDialog open={!!deleteClientId} onOpenChange={(open) => !open && setDeleteClientId(null)}>
         <AlertDialogContent className="max-w-sm rounded-2xl p-6">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-lg">Konfirmasi Hapus</AlertDialogTitle>
-            <AlertDialogDescription className="text-xs">
+            <AlertDialogDescription className="text-sm">
               Apakah Anda yakin ingin menghapus data client ini secara permanen? Seluruh riwayat log aktivitas client ini juga akan ikut terhapus dan tidak dapat dikembalikan.
             </AlertDialogDescription>
           </AlertDialogHeader>
