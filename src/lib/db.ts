@@ -7,6 +7,8 @@ export interface Client {
   businessName: string;
   address: string;
   category: 'High' | 'Medium' | 'Low';
+  businessType?: string;
+  infoSource?: string;
   customValues?: string;
   createdAt: string;
   updatedAt: string;
@@ -51,10 +53,15 @@ const initDb = async () => {
         "businessName" VARCHAR(255) NOT NULL,
         address TEXT NOT NULL,
         category VARCHAR(50) NOT NULL CHECK(category IN ('High', 'Medium', 'Low')),
+        "businessType" VARCHAR(255),
+        "infoSource" VARCHAR(255),
         "customValues" TEXT DEFAULT '{}',
         "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "businessType" VARCHAR(255);
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "infoSource" VARCHAR(255);
 
       CREATE TABLE IF NOT EXISTS client_logs (
         id SERIAL PRIMARY KEY,

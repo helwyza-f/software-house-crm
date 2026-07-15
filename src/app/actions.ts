@@ -14,10 +14,10 @@ export async function getClients(search = '', category = '', page = 1, limit = 1
     let pCount = 1;
 
     if (search.trim()) {
-      whereClause += ` AND (name ILIKE $${pCount} OR "businessName" ILIKE $${pCount + 1} OR phone ILIKE $${pCount + 2} OR address ILIKE $${pCount + 3})`;
+      whereClause += ` AND (name ILIKE $${pCount} OR "businessName" ILIKE $${pCount + 1} OR phone ILIKE $${pCount + 2} OR address ILIKE $${pCount + 3} OR "businessType" ILIKE $${pCount + 4} OR "infoSource" ILIKE $${pCount + 5})`;
       const searchParam = `%${search.trim()}%`;
-      params.push(searchParam, searchParam, searchParam, searchParam);
-      pCount += 4;
+      params.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
+      pCount += 6;
     }
 
     if (category && category !== 'ALL') {
@@ -79,6 +79,8 @@ export async function createClient(
     businessName: string;
     address: string;
     category: 'High' | 'Medium' | 'Low';
+    businessType?: string;
+    infoSource?: string;
     customValues?: string;
   },
   initialLog?: string
@@ -88,8 +90,8 @@ export async function createClient(
     await dbClient.query('BEGIN');
 
     const clientQuery = `
-      INSERT INTO clients (name, phone, "businessName", address, category, "customValues", "createdAt", "updatedAt")
-      VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO clients (name, phone, "businessName", address, category, "businessType", "infoSource", "customValues", "createdAt", "updatedAt")
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING id
     `;
     const clientParams = [
@@ -98,6 +100,8 @@ export async function createClient(
       clientData.businessName,
       clientData.address,
       clientData.category,
+      clientData.businessType || '',
+      clientData.infoSource || '',
       clientData.customValues || '{}'
     ];
     
@@ -132,14 +136,16 @@ export async function updateClient(
     businessName: string;
     address: string;
     category: 'High' | 'Medium' | 'Low';
+    businessType?: string;
+    infoSource?: string;
     customValues?: string;
   }
 ) {
   try {
     const query = `
       UPDATE clients
-      SET name = $1, phone = $2, "businessName" = $3, address = $4, category = $5, "customValues" = $6, "updatedAt" = CURRENT_TIMESTAMP
-      WHERE id = $7
+      SET name = $1, phone = $2, "businessName" = $3, address = $4, category = $5, "businessType" = $6, "infoSource" = $7, "customValues" = $8, "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $9
     `;
     const params = [
       clientData.name,
@@ -147,6 +153,8 @@ export async function updateClient(
       clientData.businessName,
       clientData.address,
       clientData.category,
+      clientData.businessType || '',
+      clientData.infoSource || '',
       clientData.customValues || '{}',
       id
     ];
@@ -232,5 +240,109 @@ export async function saveCustomFields(fields: string[]) {
   } catch (error) {
     console.error('Error saving custom fields:', error);
     return { success: false, error: 'Failed to save custom fields' };
+  }
+}
+
+// Default options for global dropdown fields
+const DEFAULT_BUSINESS_TYPES = ['UMKM', 'Corporate', 'Startup'];
+const DEFAULT_INFO_SOURCES = ['Instagram', 'Website', 'Rekomendasi Teman'];
+
+export async function getGlobalOptions() {
+  try {
+    const res = await pool.query("SELECT key, value FROM settings WHERE key IN ('options_business_type', 'options_info_source')");
+    
+    let businessTypes = [...DEFAULT_BUSINESS_TYPES];
+    let infoSources = [...DEFAULT_INFO_SOURCES];
+
+    res.rows.forEach((row: { key: string; value: string }) => {
+      if (row.key === 'options_business_type') {
+        businessTypes = JSON.parse(row.value);
+      } else if (row.key === 'options_info_source') {
+        infoSources = JSON.parse(row.value);
+      }
+    });
+
+    return { success: true, data: { businessTypes, infoSources } };
+  } catch (error) {
+    console.error('Error getting global options:', error);
+    return { 
+      success: false, 
+      error: 'Failed to load options',
+      data: { businessTypes: DEFAULT_BUSINESS_TYPES, infoSources: DEFAULT_INFO_SOURCES }
+    };
+  }
+}
+
+export async function addGlobalOption(type: 'businessType' | 'infoSource', value: string) {
+  try {
+    const valTrim = value.trim();
+    if (!valTrim) return { success: false, error: 'Opsi tidak boleh kosong' };
+
+    const key = type === 'businessType' ? 'options_business_type' : 'options_info_source';
+    
+    // Load current options
+    const optionsRes = await getGlobalOptions();
+    const currentList = type === 'businessType' 
+      ? optionsRes.data.businessTypes 
+      : optionsRes.data.infoSources;
+
+    // Check duplicate case-insensitively
+    if (currentList.some(item => item.toLowerCase() === valTrim.toLowerCase())) {
+      return { success: false, error: 'Opsi ini sudah ada' };
+    }
+
+    const newList = [...currentList, valTrim];
+    
+    const query = `
+      INSERT INTO settings (key, value)
+      VALUES ($1, $2)
+      ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+    `;
+    await pool.query(query, [key, JSON.stringify(newList)]);
+    revalidatePath('/');
+    return { success: true, data: newList };
+  } catch (error) {
+    console.error('Error adding global option:', error);
+    return { success: false, error: 'Gagal menambahkan opsi baru' };
+  }
+}
+
+export async function deleteGlobalOption(type: 'businessType' | 'infoSource', value: string) {
+  try {
+    // Check if any client is currently using this option value
+    const checkQuery = type === 'businessType' 
+      ? 'SELECT COUNT(*) as count FROM clients WHERE "businessType" = $1'
+      : 'SELECT COUNT(*) as count FROM clients WHERE "infoSource" = $1';
+      
+    const checkRes = await pool.query(checkQuery, [value]);
+    const count = parseInt(checkRes.rows[0].count, 10);
+    
+    if (count > 0) {
+      return { 
+        success: false, 
+        error: `Opsi ini sedang digunakan oleh ${count} data client dan tidak bisa dihapus.` 
+      };
+    }
+
+    // Load current options
+    const key = type === 'businessType' ? 'options_business_type' : 'options_info_source';
+    const optionsRes = await getGlobalOptions();
+    const currentList = type === 'businessType' 
+      ? optionsRes.data.businessTypes 
+      : optionsRes.data.infoSources;
+
+    const newList = currentList.filter(item => item !== value);
+    
+    const query = `
+      INSERT INTO settings (key, value)
+      VALUES ($1, $2)
+      ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+    `;
+    await pool.query(query, [key, JSON.stringify(newList)]);
+    revalidatePath('/');
+    return { success: true, data: newList };
+  } catch (error) {
+    console.error('Error deleting global option:', error);
+    return { success: false, error: 'Gagal menghapus opsi' };
   }
 }
