@@ -7,36 +7,93 @@ export interface ClientWithLogs extends Client {
   logs: ClientLog[];
 }
 
-export async function getClients(search = '', category = '', page = 1, limit = 12) {
+export async function getClients(
+  search = '', 
+  category = '', 
+  businessType = '',
+  infoSource = '',
+  page = 1, 
+  limit = 12
+) {
   try {
-    let whereClause = ' WHERE 1=1';
-    const params: (string | number)[] = [];
-    let pCount = 1;
+    // Helper to build WHERE clause
+    const buildWhere = (s: string, cat: string, bus: string, info: string) => {
+      let where = ' WHERE 1=1';
+      const params: (string | number)[] = [];
+      let pCount = 1;
 
-    if (search.trim()) {
-      whereClause += ` AND (name ILIKE $${pCount} OR "businessName" ILIKE $${pCount + 1} OR phone ILIKE $${pCount + 2} OR address ILIKE $${pCount + 3} OR "businessType" ILIKE $${pCount + 4} OR "infoSource" ILIKE $${pCount + 5})`;
-      const searchParam = `%${search.trim()}%`;
-      params.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
-      pCount += 6;
-    }
+      if (s.trim()) {
+        where += ` AND (name ILIKE $${pCount} OR "businessName" ILIKE $${pCount + 1} OR phone ILIKE $${pCount + 2} OR address ILIKE $${pCount + 3} OR "businessType" ILIKE $${pCount + 4} OR "infoSource" ILIKE $${pCount + 5})`;
+        const searchParam = `%${s.trim()}%`;
+        params.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
+        pCount += 6;
+      }
 
-    if (category && category !== 'ALL') {
-      whereClause += ` AND category = $${pCount}`;
-      params.push(category);
-      pCount += 1;
-    }
+      if (cat && cat !== 'ALL') {
+        where += ` AND category = $${pCount}`;
+        params.push(cat);
+        pCount += 1;
+      }
 
+      if (bus && bus !== 'ALL') {
+        where += ` AND "businessType" = $${pCount}`;
+        params.push(bus);
+        pCount += 1;
+      }
+
+      if (info && info !== 'ALL') {
+        where += ` AND "infoSource" = $${pCount}`;
+        params.push(info);
+        pCount += 1;
+      }
+
+      return { where, params, nextParamIndex: pCount };
+    };
+
+    // 1. Get main client lists matching all active filters
+    const { where: mainWhere, params: mainParams, nextParamIndex } = buildWhere(search, category, businessType, infoSource);
+    
     // Get total count for pagination
-    const countRes = await pool.query(`SELECT COUNT(*) as count FROM clients${whereClause}`, params);
+    const countRes = await pool.query(`SELECT COUNT(*) as count FROM clients${mainWhere}`, mainParams);
     const total = parseInt(countRes.rows[0].count, 10);
 
     // Fetch paginated records
     const offset = (page - 1) * limit;
-    params.push(limit, offset);
-    const query = `SELECT * FROM clients${whereClause} ORDER BY "updatedAt" DESC LIMIT $${pCount} OFFSET $${pCount + 1}`;
+    const paginatedParams = [...mainParams, limit, offset];
+    const query = `SELECT * FROM clients${mainWhere} ORDER BY "updatedAt" DESC LIMIT $${nextParamIndex} OFFSET $${nextParamIndex + 1}`;
     
-    const res = await pool.query(query, params);
+    const res = await pool.query(query, paginatedParams);
     const clients = res.rows as Client[];
+
+    // 2. Fetch facet counts for Categories (ignoring active category filter)
+    const { where: catWhere, params: catParams } = buildWhere(search, 'ALL', businessType, infoSource);
+    const catCountsRes = await pool.query(`SELECT category, COUNT(*) as count FROM clients${catWhere} GROUP BY category`, catParams);
+    const catTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${catWhere}`, catParams);
+    
+    const categoryCounts: Record<string, number> = { High: 0, Medium: 0, Low: 0, ALL: parseInt(catTotalRes.rows[0].count, 10) };
+    catCountsRes.rows.forEach((row: { category: string; count: string }) => {
+      categoryCounts[row.category] = parseInt(row.count, 10);
+    });
+
+    // 3. Fetch facet counts for Business Types (ignoring active businessType filter)
+    const { where: busWhere, params: busParams } = buildWhere(search, category, 'ALL', infoSource);
+    const busCountsRes = await pool.query(`SELECT "businessType", COUNT(*) as count FROM clients${busWhere} GROUP BY "businessType"`, busParams);
+    const busTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${busWhere}`, busParams);
+    
+    const businessTypeCounts: Record<string, number> = { ALL: parseInt(busTotalRes.rows[0].count, 10) };
+    busCountsRes.rows.forEach((row: { businessType: string; count: string }) => {
+      businessTypeCounts[row.businessType || 'Tidak Ada'] = parseInt(row.count, 10);
+    });
+
+    // 4. Fetch facet counts for Info Sources (ignoring active infoSource filter)
+    const { where: infoWhere, params: infoParams } = buildWhere(search, category, businessType, 'ALL');
+    const infoCountsRes = await pool.query(`SELECT "infoSource", COUNT(*) as count FROM clients${infoWhere} GROUP BY "infoSource"`, infoParams);
+    const infoTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${infoWhere}`, infoParams);
+    
+    const infoSourceCounts: Record<string, number> = { ALL: parseInt(infoTotalRes.rows[0].count, 10) };
+    infoCountsRes.rows.forEach((row: { infoSource: string; count: string }) => {
+      infoSourceCounts[row.infoSource || 'Tidak Ada'] = parseInt(row.count, 10);
+    });
 
     return { 
       success: true, 
@@ -44,7 +101,12 @@ export async function getClients(search = '', category = '', page = 1, limit = 1
         clients,
         total,
         page,
-        pages: Math.ceil(total / limit)
+        pages: Math.ceil(total / limit),
+        facets: {
+          categories: categoryCounts,
+          businessTypes: businessTypeCounts,
+          infoSources: infoSourceCounts
+        }
       }
     };
   } catch (error) {

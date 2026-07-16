@@ -7,6 +7,7 @@ import {
   deleteClient, 
   addClientLog,
   getCustomFields,
+  getGlobalOptions,
   ClientWithLogs
 } from './actions';
 import { Client } from '@/lib/db';
@@ -16,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -42,7 +44,22 @@ export default function Dashboard() {
   const [clients, setClients] = useState<Client[]>([]);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  
+  // Parallel filters state
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [businessTypeFilter, setBusinessTypeFilter] = useState('ALL');
+  const [infoSourceFilter, setInfoSourceFilter] = useState('ALL');
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Facet counts state
+  const [facets, setFacets] = useState({
+    categories: { High: 0, Medium: 0, Low: 0, ALL: 0 } as Record<string, number>,
+    businessTypes: { ALL: 0 } as Record<string, number>,
+    infoSources: { ALL: 0 } as Record<string, number>
+  });
+
+  // Global choices list
+  const [globalOptions, setGlobalOptions] = useState<{ businessTypes: string[], infoSources: string[] }>({ businessTypes: [], infoSources: [] });
   
   // Pagination states
   const [page, setPage] = useState(1);
@@ -73,11 +90,14 @@ export default function Dashboard() {
   // Fetch clients function
   const fetchClients = () => {
     startTransition(async () => {
-      const res = await getClients(debouncedSearch, categoryFilter, page, itemsPerPage);
+      const res = await getClients(debouncedSearch, categoryFilter, businessTypeFilter, infoSourceFilter, page, itemsPerPage);
       if (res.success && res.data) {
         setClients(res.data.clients);
         setTotalPages(res.data.pages);
         setTotalClients(res.data.total);
+        if (res.data.facets) {
+          setFacets(res.data.facets);
+        }
       } else {
         toast.error(res.error || 'Gagal memuat data client');
       }
@@ -92,12 +112,21 @@ export default function Dashboard() {
     }
   };
 
+  // Fetch dropdown options list
+  const fetchDropdownOptions = async () => {
+    const res = await getGlobalOptions();
+    if (res.success && res.data) {
+      setGlobalOptions(res.data);
+    }
+  };
+
   useEffect(() => {
     fetchClients();
-  }, [debouncedSearch, categoryFilter, page]);
+  }, [debouncedSearch, categoryFilter, businessTypeFilter, infoSourceFilter, page]);
 
   useEffect(() => {
     fetchCustomFields();
+    fetchDropdownOptions();
   }, []);
 
   // Load client logs
@@ -175,6 +204,8 @@ export default function Dashboard() {
     }
   };
 
+  const isFilterActive = categoryFilter !== 'ALL' || businessTypeFilter !== 'ALL' || infoSourceFilter !== 'ALL';
+
   return (
     <div className="max-w-6xl mx-auto w-full px-4 py-6 md:py-10 flex-grow flex flex-col gap-6">
       
@@ -205,38 +236,99 @@ export default function Dashboard() {
 
       {/* Filter and Search Bar */}
       <section className="flex flex-col gap-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-          <Input 
-            placeholder="Cari nama, usaha, no hp, alamat..." 
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 bg-white border-slate-200/80 rounded-xl focus-visible:ring-1 text-sm shadow-sm"
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-grow">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+            <Input 
+              placeholder="Cari nama, usaha, no hp, alamat..." 
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 bg-white border-slate-200/80 rounded-xl focus-visible:ring-1 text-sm shadow-sm"
+            />
+          </div>
+          <Button 
+            variant="outline" 
+            onClick={() => setShowFilters(!showFilters)}
+            className={`rounded-xl border-slate-200/80 text-sm flex gap-1.5 items-center px-4 ${showFilters ? 'bg-slate-100 border-slate-300' : 'bg-white'}`}
+          >
+            <Filter className="h-4 w-4" /> Filter {isFilterActive && '•'}
+          </Button>
         </div>
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-          <span className="text-sm text-slate-400 flex items-center gap-1 mr-1">
-            <Filter className="h-3 w-3" /> Potensi:
-          </span>
-          {[
-            { value: 'ALL', label: 'Semua' },
-            { value: 'High', label: 'High' },
-            { value: 'Medium', label: 'Medium' },
-            { value: 'Low', label: 'Low' },
-          ].map((btn) => (
-            <button
-              key={btn.value}
-              onClick={() => { setCategoryFilter(btn.value); setPage(1); }}
-              className={`text-sm px-3.5 py-1.5 rounded-full font-medium transition-all ${
-                categoryFilter === btn.value
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-100'
-              }`}
-            >
-              {btn.label}
-            </button>
-          ))}
-        </div>
+
+        {/* Collapsible Parallel Filter Panel */}
+        {showFilters && (
+          <Card className="border border-slate-100 shadow-inner rounded-2xl bg-slate-50/50 p-4 transition-all duration-200">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* Potensi / Kategori */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Potensi</Label>
+                <Select value={categoryFilter} onValueChange={(val) => { setCategoryFilter(val || 'ALL'); setPage(1); }}>
+                  <SelectTrigger className="w-full bg-white h-9.5 text-sm rounded-xl border-slate-200/80">
+                    <SelectValue placeholder="Semua Kategori" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-sm">Semua Kategori ({facets.categories.ALL})</SelectItem>
+                    <SelectItem value="High" className="text-sm">🔥 High Potential ({facets.categories.High})</SelectItem>
+                    <SelectItem value="Medium" className="text-sm">⚡ Medium Potential ({facets.categories.Medium})</SelectItem>
+                    <SelectItem value="Low" className="text-sm">❄️ Low Potential ({facets.categories.Low})</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Jenis Usaha */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Jenis Usaha</Label>
+                <Select value={businessTypeFilter} onValueChange={(val) => { setBusinessTypeFilter(val || 'ALL'); setPage(1); }}>
+                  <SelectTrigger className="w-full bg-white h-9.5 text-sm rounded-xl border-slate-200/80">
+                    <SelectValue placeholder="Semua Jenis Usaha" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-sm">Semua Jenis Usaha ({facets.businessTypes.ALL})</SelectItem>
+                    {globalOptions.businessTypes.map((type) => {
+                      const count = facets.businessTypes[type] || 0;
+                      return (
+                        <SelectItem key={type} value={type} className="text-sm">
+                          💼 {type} ({count})
+                        </SelectItem>
+                      );
+                    })}
+                    {facets.businessTypes['Tidak Ada'] !== undefined && facets.businessTypes['Tidak Ada'] > 0 && (
+                      <SelectItem value="Tidak Ada" className="text-sm">
+                        ❌ Belum diisi ({facets.businessTypes['Tidak Ada']})
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Sumber Informasi */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Sumber Informasi</Label>
+                <Select value={infoSourceFilter} onValueChange={(val) => { setInfoSourceFilter(val || 'ALL'); setPage(1); }}>
+                  <SelectTrigger className="w-full bg-white h-9.5 text-sm rounded-xl border-slate-200/80">
+                    <SelectValue placeholder="Semua Sumber" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-sm">Semua Sumber ({facets.infoSources.ALL})</SelectItem>
+                    {globalOptions.infoSources.map((source) => {
+                      const count = facets.infoSources[source] || 0;
+                      return (
+                        <SelectItem key={source} value={source} className="text-sm">
+                          📢 {source} ({count})
+                        </SelectItem>
+                      );
+                    })}
+                    {facets.infoSources['Tidak Ada'] !== undefined && facets.infoSources['Tidak Ada'] > 0 && (
+                      <SelectItem value="Tidak Ada" className="text-sm">
+                        ❌ Belum diisi ({facets.infoSources['Tidak Ada']})
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </Card>
+        )}
       </section>
 
       {/* Clients List */}
