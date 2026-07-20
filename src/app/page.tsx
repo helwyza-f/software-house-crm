@@ -10,6 +10,7 @@ import {
   getGlobalOptions,
   getSession,
   logout,
+  togglePinClient,
   ClientWithLogs
 } from './actions';
 import { Client } from '@/lib/db';
@@ -39,6 +40,7 @@ import {
   Trash2, 
   User, 
   Users,
+  Pin,
   MessageSquarePlus, 
   Filter, 
   Calendar,
@@ -512,7 +514,10 @@ export default function Dashboard() {
                 const filledCustoms = Object.entries(customValuesObj).filter(([_, val]) => val.trim());
 
                 return (
-                  <Card key={client.id} className="border border-slate-100 shadow-sm rounded-2xl bg-white hover:shadow-md transition-all flex flex-col justify-between">
+                  <Card key={client.id} className={cn(
+                    "border shadow-sm rounded-2xl bg-white hover:shadow-md transition-all flex flex-col justify-between",
+                    client.isPinned ? "border-amber-200/80 shadow-amber-50/50 bg-amber-50/5" : "border-slate-100"
+                  )}>
                     <div>
                       <CardHeader className="p-4 pb-2.5 flex flex-row items-start justify-between gap-4 space-y-0">
                         <div className="space-y-1">
@@ -575,6 +580,29 @@ export default function Dashboard() {
                         <Calendar className="h-3 w-3" /> Update: {formatDate(client.updatedAt)}
                       </span>
                       <div className="flex items-center gap-1.5">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className={cn(
+                            "h-8 w-8 rounded-lg transition-colors",
+                            client.isPinned 
+                              ? "text-amber-500 hover:text-amber-600 bg-amber-50 hover:bg-amber-100" 
+                              : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                          )}
+                          onClick={async () => {
+                            const res = await togglePinClient(client.id);
+                            if (res.success) {
+                              toast.success(client.isPinned ? 'Sematan berhasil dilepas' : 'Client berhasil disematkan ke baris teratas');
+                              fetchClients();
+                            } else {
+                              toast.error(res.error || 'Gagal menyematkan client');
+                            }
+                          }}
+                          title={client.isPinned ? "Lepas Pin" : "Sematkan Teratas"}
+                        >
+                          <Pin className={cn("h-4 w-4", client.isPinned && "fill-amber-500")} />
+                        </Button>
+
                         <Button 
                           variant="ghost" 
                           size="icon" 

@@ -11,6 +11,7 @@ export interface Client {
   businessType?: string;
   infoSource?: string;
   customValues?: string;
+  isPinned?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -107,6 +108,7 @@ const initDb = async () => {
     await client.query(`
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "businessType" VARCHAR(255);
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "infoSource" VARCHAR(255);
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "isPinned" BOOLEAN DEFAULT FALSE;
 
       ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "userId" INTEGER REFERENCES users(id) ON DELETE SET NULL;
       ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "createdBy" VARCHAR(255);

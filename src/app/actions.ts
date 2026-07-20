@@ -257,7 +257,7 @@ export async function getClients(
     // Fetch paginated records
     const offset = (page - 1) * limit;
     const paginatedParams = [...mainParams, limit, offset];
-    const query = `SELECT * FROM clients${mainWhere} ORDER BY "updatedAt" DESC LIMIT $${nextParamIndex} OFFSET $${nextParamIndex + 1}`;
+    const query = `SELECT * FROM clients${mainWhere} ORDER BY "isPinned" DESC, "updatedAt" DESC LIMIT $${nextParamIndex} OFFSET $${nextParamIndex + 1}`;
     
     const res = await pool.query(query, paginatedParams);
     const clients = res.rows as Client[];
@@ -671,5 +671,54 @@ export async function deleteGlobalOption(type: 'businessType' | 'infoSource', va
   } catch (error) {
     console.error('Error deleting global option:', error);
     return { success: false, error: 'Gagal menghapus opsi' };
+  }
+}
+
+export async function togglePinClient(id: number) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+
+    const clientRes = await pool.query('SELECT "isPinned" FROM clients WHERE id = $1', [id]);
+    if (clientRes.rows.length === 0) {
+      return { success: false, error: 'Client tidak ditemukan' };
+    }
+    
+    const currentlyPinned = !!clientRes.rows[0].isPinned;
+
+    if (!currentlyPinned) {
+      // Check maximum pin limit
+      const countRes = await pool.query('SELECT COUNT(*) as count FROM clients WHERE "isPinned" = TRUE');
+      const pinnedCount = parseInt(countRes.rows[0].count, 10);
+      if (pinnedCount >= 3) {
+        return { success: false, error: 'Maksimal 3 client yang dapat dipin di baris teratas' };
+      }
+
+      await pool.query('UPDATE clients SET "isPinned" = TRUE, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1', [id]);
+      
+      const displayRole = session.role === 'super_admin' ? 'Super Admin' : (session.role === 'admin' ? 'Admin' : 'Staff');
+      const creatorName = `${session.username} (${displayRole})`;
+      await pool.query(
+        'INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)',
+        [id, 'Menyematkan (pin) client ke baris teratas.', session.id, creatorName]
+      );
+    } else {
+      await pool.query('UPDATE clients SET "isPinned" = FALSE, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1', [id]);
+
+      const displayRole = session.role === 'super_admin' ? 'Super Admin' : (session.role === 'admin' ? 'Admin' : 'Staff');
+      const creatorName = `${session.username} (${displayRole})`;
+      await pool.query(
+        'INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)',
+        [id, 'Melepas sematan (unpin) client dari baris teratas.', session.id, creatorName]
+      );
+    }
+
+    revalidatePath('/');
+    return { success: true };
+  } catch (error) {
+    console.error('Error toggling pin:', error);
+    return { success: false, error: 'Gagal mengubah status sematan client' };
   }
 }
