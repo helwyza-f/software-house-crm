@@ -267,6 +267,22 @@ export default function Dashboard() {
               className="pl-9 bg-white border-slate-200/80 rounded-xl focus-visible:ring-1 text-sm shadow-sm"
             />
           </div>
+          {isFilterActive && (
+            <Button 
+              variant="ghost" 
+              onClick={() => {
+                setCategoryFilter('ALL');
+                setBusinessTypeFilter('ALL');
+                setInfoSourceFilter('ALL');
+                setDate(undefined);
+                setSearch('');
+                setPage(1);
+              }}
+              className="rounded-xl hover:bg-rose-50 text-rose-600 border border-transparent hover:border-rose-100 text-sm px-4"
+            >
+              Reset
+            </Button>
+          )}
           <Button 
             variant="outline" 
             onClick={() => setShowFilters(!showFilters)}
@@ -398,6 +414,23 @@ export default function Dashboard() {
               </div>
 
             </div>
+            {isFilterActive && (
+              <div className="flex justify-end pt-3 mt-3 border-t border-slate-200/40">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCategoryFilter('ALL');
+                    setBusinessTypeFilter('ALL');
+                    setInfoSourceFilter('ALL');
+                    setDate(undefined);
+                    setPage(1);
+                  }}
+                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold cursor-pointer select-none"
+                >
+                  Reset Semua Filter
+                </button>
+              </div>
+            )}
           </Card>
         )}
       </section>
