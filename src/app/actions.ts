@@ -1,11 +1,84 @@
 'use server';
 
-import { pool, Client, ClientLog } from '@/lib/db';
+import { pool, Client, ClientLog, hashPassword } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
+import crypto from 'crypto';
+
+const SESSION_SECRET = process.env.SESSION_SECRET || 'crm-super-secret-key-32-chars-long!!';
 
 export interface ClientWithLogs extends Client {
   logs: ClientLog[];
 }
+
+// ==========================================
+// AUTHENTICATION ACTIONS
+// ==========================================
+
+export async function getSession() {
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get('session');
+  if (!sessionCookie) return null;
+
+  try {
+    const [payloadBase64, signature] = sessionCookie.value.split('.');
+    
+    // Verify signature
+    const expectedSig = crypto.createHmac('sha256', SESSION_SECRET).update(payloadBase64).digest('hex');
+    if (signature !== expectedSig) return null;
+
+    const payload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf8'));
+    return payload as { id: number; username: string; role: 'admin' | 'staff' };
+  } catch {
+    return null;
+  }
+}
+
+export async function login(usernameInput: string, passwordInput: string) {
+  try {
+    const username = usernameInput.trim().toLowerCase();
+    const res = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    if (res.rows.length === 0) {
+      return { success: false, error: 'Username atau password salah' };
+    }
+
+    const user = res.rows[0];
+    const hash = hashPassword(passwordInput, user.salt);
+    if (hash !== user.password_hash) {
+      return { success: false, error: 'Username atau password salah' };
+    }
+
+    // Set signed session cookie
+    const payload = { id: user.id, username: user.username, role: user.role };
+    const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString('base64');
+    const signature = crypto.createHmac('sha256', SESSION_SECRET).update(payloadBase64).digest('hex');
+    
+    const sessionToken = `${payloadBase64}.${signature}`;
+    const cookieStore = await cookies();
+    cookieStore.set('session', sessionToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 // 24 hours
+    });
+
+    return { success: true, role: user.role };
+  } catch (error) {
+    console.error('Error logging in:', error);
+    return { success: false, error: 'Terjadi kesalahan sistem' };
+  }
+}
+
+export async function logout() {
+  const cookieStore = await cookies();
+  cookieStore.delete('session');
+  return { success: true };
+}
+
+// ==========================================
+// CLIENT LEAD ACTIONS
+// ==========================================
 
 export async function getClients(
   search = '', 
@@ -163,6 +236,11 @@ export async function createClient(
 ) {
   const dbClient = await pool.connect();
   try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+
     await dbClient.query('BEGIN');
 
     const clientQuery = `
@@ -184,12 +262,22 @@ export async function createClient(
     const clientRes = await dbClient.query(clientQuery, clientParams);
     const clientId = clientRes.rows[0].id as number;
 
+    const creatorName = `${session.username} (${session.role === 'admin' ? 'Admin' : 'Staff'})`;
+
+    // 1. Write registration audit log
+    const auditText = `Mendaftarkan client baru ke dalam sistem.`;
+    await dbClient.query(`
+      INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt")
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+    `, [clientId, auditText, session.id, creatorName]);
+
+    // 2. Write initial details log if provided
     if (initialLog && initialLog.trim()) {
       const logQuery = `
-        INSERT INTO client_logs ("clientId", "logText", "createdAt")
-        VALUES ($1, $2, CURRENT_TIMESTAMP)
+        INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt")
+        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
       `;
-      await dbClient.query(logQuery, [clientId, initialLog.trim()]);
+      await dbClient.query(logQuery, [clientId, initialLog.trim(), session.id, creatorName]);
     }
 
     await dbClient.query('COMMIT');
@@ -218,8 +306,23 @@ export async function updateClient(
   }
 ) {
   try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+    if (session.role !== 'admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin yang dapat mengedit profil client' };
+    }
+
+    // Retrieve old data to compare differences for audit logging
+    const oldRes = await pool.query('SELECT * FROM clients WHERE id = $1', [id]);
+    if (oldRes.rows.length === 0) {
+      return { success: false, error: 'Client tidak ditemukan' };
+    }
+    const oldClient = oldRes.rows[0];
+
     const query = `
-      UPDATE clients
+      UPDATE clients 
       SET name = $1, phone = $2, "businessName" = $3, address = $4, category = $5, "businessType" = $6, "infoSource" = $7, "customValues" = $8, "updatedAt" = CURRENT_TIMESTAMP
       WHERE id = $9
     `;
@@ -234,11 +337,26 @@ export async function updateClient(
       clientData.customValues || '{}',
       id
     ];
-
-    const result = await pool.query(query, params);
     
-    if (result.rowCount === 0) {
-      return { success: false, error: 'Client not found or no changes made' };
+    await pool.query(query, params);
+
+    // Audit logs for client update
+    const changes: string[] = [];
+    if (oldClient.name !== clientData.name) changes.push(`Nama: "${oldClient.name}" ➔ "${clientData.name}"`);
+    if (oldClient.phone !== clientData.phone) changes.push(`No HP: "${oldClient.phone}" ➔ "${clientData.phone}"`);
+    if (oldClient.businessName !== clientData.businessName) changes.push(`Nama Usaha: "${oldClient.businessName}" ➔ "${clientData.businessName}"`);
+    if (oldClient.address !== clientData.address) changes.push(`Alamat: "${oldClient.address}" ➔ "${clientData.address}"`);
+    if (oldClient.category !== clientData.category) changes.push(`Potensi: "${oldClient.category}" ➔ "${clientData.category}"`);
+    if (oldClient.businessType !== clientData.businessType) changes.push(`Jenis Usaha: "${oldClient.businessType || 'Kosong'}" ➔ "${clientData.businessType || 'Kosong'}"`);
+    if (oldClient.infoSource !== clientData.infoSource) changes.push(`Sumber Info: "${oldClient.infoSource || 'Kosong'}" ➔ "${clientData.infoSource || 'Kosong'}"`);
+
+    if (changes.length > 0) {
+      const creatorName = `${session.username} (Admin)`;
+      const auditText = `Mengubah data client: ${changes.join(', ')}`;
+      await pool.query(
+        'INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)',
+        [id, auditText, session.id, creatorName]
+      );
     }
 
     revalidatePath('/');
@@ -251,6 +369,14 @@ export async function updateClient(
 
 export async function deleteClient(id: number) {
   try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+    if (session.role !== 'admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin yang dapat menghapus data client' };
+    }
+
     await pool.query('DELETE FROM clients WHERE id = $1', [id]);
     revalidatePath('/');
     return { success: true };
@@ -261,56 +387,64 @@ export async function deleteClient(id: number) {
 }
 
 export async function addClientLog(clientId: number, logText: string) {
-  const dbClient = await pool.connect();
   try {
-    await dbClient.query('BEGIN');
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
 
-    const logQuery = `
-      INSERT INTO client_logs ("clientId", "logText", "createdAt")
-      VALUES ($1, $2, CURRENT_TIMESTAMP)
+    const creatorName = `${session.username} (${session.role === 'admin' ? 'Admin' : 'Staff'})`;
+
+    const query = `
+      INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt")
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
     `;
-    await dbClient.query(logQuery, [clientId, logText.trim()]);
+    await pool.query(query, [clientId, logText.trim(), session.id, creatorName]);
+    
+    // Touch updated timestamp on client
+    await pool.query('UPDATE clients SET "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1', [clientId]);
 
-    const updateQuery = `
-      UPDATE clients SET "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1
-    `;
-    await dbClient.query(updateQuery, [clientId]);
-
-    await dbClient.query('COMMIT');
     revalidatePath('/');
     return { success: true };
   } catch (error) {
-    await dbClient.query('ROLLBACK');
-    console.error('Error adding log:', error);
-    return { success: false, error: 'Failed to add log' };
-  } finally {
-    dbClient.release();
+    console.error('Error adding client log:', error);
+    return { success: false, error: 'Failed to add client log' };
   }
 }
 
+// ==========================================
+// VARIABLE CONFIG / SETTINGS ACTIONS
+// ==========================================
+
 export async function getCustomFields() {
   try {
-    const res = await pool.query("SELECT value FROM settings WHERE key = 'custom_fields'");
-    const row = res.rows[0] as { value: string } | undefined;
-    if (!row) {
-      return { success: true, data: [] as string[] };
+    const res = await pool.query('SELECT value FROM settings WHERE key = $1', ['custom_fields']);
+    if (res.rows.length === 0) {
+      return { success: true, data: [] };
     }
-    const fields = JSON.parse(row.value) as string[];
-    return { success: true, data: fields };
+    return { success: true, data: JSON.parse(res.rows[0].value) as string[] };
   } catch (error) {
     console.error('Error fetching custom fields:', error);
-    return { success: false, error: 'Failed to fetch custom fields', data: [] as string[] };
+    return { success: false, error: 'Failed to fetch custom fields' };
   }
 }
 
 export async function saveCustomFields(fields: string[]) {
   try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+    if (session.role !== 'admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin yang dapat mengubah variabel custom' };
+    }
+
     const query = `
       INSERT INTO settings (key, value)
-      VALUES ('custom_fields', $1)
+      VALUES ($1, $2)
       ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
     `;
-    await pool.query(query, [JSON.stringify(fields)]);
+    await pool.query(query, ['custom_fields', JSON.stringify(fields)]);
     revalidatePath('/');
     return { success: true };
   } catch (error) {
@@ -319,18 +453,14 @@ export async function saveCustomFields(fields: string[]) {
   }
 }
 
-// Default options for global dropdown fields
-const DEFAULT_BUSINESS_TYPES = ['UMKM', 'Corporate', 'Startup'];
-const DEFAULT_INFO_SOURCES = ['Instagram', 'Website', 'Rekomendasi Teman'];
-
 export async function getGlobalOptions() {
   try {
     const res = await pool.query("SELECT key, value FROM settings WHERE key IN ('options_business_type', 'options_info_source')");
     
-    let businessTypes = [...DEFAULT_BUSINESS_TYPES];
-    let infoSources = [...DEFAULT_INFO_SOURCES];
+    let businessTypes = ['Corporate', 'Retail', 'UMKM'];
+    let infoSources = ['Google', 'Rekomendasi', 'Media Sosial'];
 
-    res.rows.forEach((row: { key: string; value: string }) => {
+    res.rows.forEach((row: { key: string, value: string }) => {
       if (row.key === 'options_business_type') {
         businessTypes = JSON.parse(row.value);
       } else if (row.key === 'options_info_source') {
@@ -340,29 +470,31 @@ export async function getGlobalOptions() {
 
     return { success: true, data: { businessTypes, infoSources } };
   } catch (error) {
-    console.error('Error getting global options:', error);
-    return { 
-      success: false, 
-      error: 'Failed to load options',
-      data: { businessTypes: DEFAULT_BUSINESS_TYPES, infoSources: DEFAULT_INFO_SOURCES }
-    };
+    console.error('Error loading global options:', error);
+    return { success: true, data: { businessTypes: ['Corporate', 'Retail', 'UMKM'], infoSources: ['Google', 'Rekomendasi', 'Media Sosial'] } };
   }
 }
 
 export async function addGlobalOption(type: 'businessType' | 'infoSource', value: string) {
   try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+    if (session.role !== 'admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin yang dapat menambah opsi' };
+    }
+
     const valTrim = value.trim();
     if (!valTrim) return { success: false, error: 'Opsi tidak boleh kosong' };
 
     const key = type === 'businessType' ? 'options_business_type' : 'options_info_source';
     
-    // Load current options
     const optionsRes = await getGlobalOptions();
     const currentList = type === 'businessType' 
       ? optionsRes.data.businessTypes 
       : optionsRes.data.infoSources;
 
-    // Check duplicate case-insensitively
     if (currentList.some(item => item.toLowerCase() === valTrim.toLowerCase())) {
       return { success: false, error: 'Opsi ini sudah ada' };
     }
@@ -385,7 +517,14 @@ export async function addGlobalOption(type: 'businessType' | 'infoSource', value
 
 export async function deleteGlobalOption(type: 'businessType' | 'infoSource', value: string) {
   try {
-    // Check if any client is currently using this option value
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+    if (session.role !== 'admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin yang dapat menghapus opsi' };
+    }
+
     const checkQuery = type === 'businessType' 
       ? 'SELECT COUNT(*) as count FROM clients WHERE "businessType" = $1'
       : 'SELECT COUNT(*) as count FROM clients WHERE "infoSource" = $1';
@@ -400,7 +539,6 @@ export async function deleteGlobalOption(type: 'businessType' | 'infoSource', va
       };
     }
 
-    // Load current options
     const key = type === 'businessType' ? 'options_business_type' : 'options_info_source';
     const optionsRes = await getGlobalOptions();
     const currentList = type === 'businessType' 

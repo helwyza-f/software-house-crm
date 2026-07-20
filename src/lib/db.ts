@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import crypto from 'crypto';
 
 export interface Client {
   id: number;
@@ -18,7 +19,27 @@ export interface ClientLog {
   id: number;
   clientId: number;
   logText: string;
+  userId?: number;
+  createdBy?: string;
   createdAt: string;
+}
+
+export interface User {
+  id: number;
+  username: string;
+  passwordHash: string;
+  salt: string;
+  role: 'admin' | 'staff';
+  createdAt: string;
+}
+
+// Password hashing utility functions
+export function hashPassword(password: string, salt: string): string {
+  return crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+}
+
+export function generateSalt(): string {
+  return crypto.randomBytes(16).toString('hex');
 }
 
 // PostgreSQL connection string
@@ -44,8 +65,17 @@ if (process.env.NODE_ENV === 'production') {
 const initDb = async () => {
   const client = await pool.connect();
   try {
-    // We use quoted column names to preserve camelCase for TypeScript compatibility
+    // 1. Create tables
     await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        salt VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL CHECK(role IN ('admin', 'staff')) DEFAULT 'staff',
+        "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS clients (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
@@ -60,9 +90,6 @@ const initDb = async () => {
         "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "businessType" VARCHAR(255);
-      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "infoSource" VARCHAR(255);
-
       CREATE TABLE IF NOT EXISTS client_logs (
         id SERIAL PRIMARY KEY,
         "clientId" INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -74,12 +101,44 @@ const initDb = async () => {
         key VARCHAR(255) PRIMARY KEY,
         value TEXT
       );
+    `);
 
+    // 2. Run migrations/column expansions
+    await client.query(`
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "businessType" VARCHAR(255);
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "infoSource" VARCHAR(255);
+
+      ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "userId" INTEGER REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "createdBy" VARCHAR(255);
+    `);
+
+    // 3. Create indexes
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_clients_category ON clients(category);
       CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
       CREATE INDEX IF NOT EXISTS idx_clients_businessName ON clients("businessName");
       CREATE INDEX IF NOT EXISTS idx_client_logs_clientId ON client_logs("clientId");
+      CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
     `);
+
+    // 4. Seed initial accounts if empty
+    const userCountRes = await client.query('SELECT COUNT(*) as count FROM users');
+    const userCount = parseInt(userCountRes.rows[0].count, 10);
+    if (userCount === 0) {
+      const adminSalt = crypto.randomBytes(16).toString('hex');
+      const adminHash = crypto.pbkdf2Sync('admin123', adminSalt, 1000, 64, 'sha512').toString('hex');
+
+      const staffSalt = crypto.randomBytes(16).toString('hex');
+      const staffHash = crypto.pbkdf2Sync('staff123', staffSalt, 1000, 64, 'sha512').toString('hex');
+
+      await client.query(`
+        INSERT INTO users (username, password_hash, salt, role) VALUES 
+        ('admin', $1, $2, 'admin'),
+        ('staff', $3, $4, 'staff')
+      `, [adminHash, adminSalt, staffHash, staffSalt]);
+      console.log('Seeded initial admin and staff users.');
+    }
+
   } catch (err) {
     console.error('Failed to initialize PostgreSQL database schema:', err);
   } finally {

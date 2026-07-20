@@ -8,6 +8,8 @@ import {
   addClientLog,
   getCustomFields,
   getGlobalOptions,
+  getSession,
+  logout,
   ClientWithLogs
 } from './actions';
 import { Client } from '@/lib/db';
@@ -43,11 +45,14 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  LogOut,
   X
 } from 'lucide-react';
 import Link from 'next/link';
 
 export default function Dashboard() {
+  const [userSession, setUserSession] = useState<{ id: number; username: string; role: 'admin' | 'staff' } | null>(null);
+  
   const [clients, setClients] = useState<Client[]>([]);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -89,6 +94,15 @@ export default function Dashboard() {
   // Convert date state to string format for server action query parameters (YYYY-MM-DD)
   const startDateStr = date?.from ? format(date.from, 'yyyy-MM-dd') : '';
   const endDateStr = date?.to ? format(date.to, 'yyyy-MM-dd') : '';
+
+  // Load user session
+  useEffect(() => {
+    async function loadSession() {
+      const session = await getSession();
+      setUserSession(session);
+    }
+    loadSession();
+  }, []);
 
   // Search Debounce Effect
   useEffect(() => {
@@ -197,6 +211,12 @@ export default function Dashboard() {
     }
   };
 
+  const handleLogout = async () => {
+    await logout();
+    toast.success('Berhasil keluar');
+    window.location.href = '/login';
+  };
+
   const getCategoryBadge = (category: string) => {
     switch (category) {
       case 'High':
@@ -226,22 +246,41 @@ export default function Dashboard() {
   };
 
   const isFilterActive = categoryFilter !== 'ALL' || businessTypeFilter !== 'ALL' || infoSourceFilter !== 'ALL' || !!date;
+  const isAdmin = userSession?.role === 'admin';
 
   return (
     <div className="max-w-6xl mx-auto w-full px-4 py-6 md:py-10 flex-grow flex flex-col gap-6">
       
       {/* Header */}
-      <header className="flex flex-col gap-1.5 pb-2">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">LeadManager</h1>
-          <div className="flex items-center gap-1.5">
-            <Link 
-              href="/settings" 
-              title="Konfigurasi Variabel"
-              className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
-            >
-              <Settings className="h-4.5 w-4.5" />
-            </Link>
+      <header className="flex flex-col gap-2 pb-2 border-b border-slate-100">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">LeadManager</h1>
+            <p className="text-sm text-slate-500">
+              Kelola data calon client Software House dengan mudah.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            {/* User Session status */}
+            <div className="flex items-center gap-2 text-xs bg-slate-100 border border-slate-200/50 p-1 px-3 rounded-full text-slate-600 font-medium">
+              <User className="h-3.5 w-3.5 text-slate-400" />
+              <span>{userSession?.username} ({userSession?.role === 'admin' ? 'Admin' : 'Staff'})</span>
+              <span className="text-slate-300">|</span>
+              <button onClick={handleLogout} className="hover:text-rose-600 font-bold flex items-center gap-1 select-none">
+                <LogOut className="h-3 w-3" /> Keluar
+              </button>
+            </div>
+            
+            {isAdmin && (
+              <Link 
+                href="/settings" 
+                title="Konfigurasi Variabel"
+                className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
+              >
+                <Settings className="h-4.5 w-4.5" />
+              </Link>
+            )}
+            
             <Link 
               href="/add"
               className={buttonVariants({ variant: 'default', size: 'sm', className: 'rounded-full shadow-sm text-sm' })}
@@ -250,9 +289,6 @@ export default function Dashboard() {
             </Link>
           </div>
         </div>
-        <p className="text-sm text-slate-500">
-          Kelola data calon client Software House dengan mudah.
-        </p>
       </header>
 
       {/* Filter and Search Bar */}
@@ -536,22 +572,28 @@ export default function Dashboard() {
                         >
                           <History className="h-4 w-4" />
                         </Button>
-                        <Link 
-                          href={`/edit/${client.id}`}
-                          className={buttonVariants({ variant: 'ghost', size: 'icon', className: 'h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg' })}
-                          title="Edit Data"
-                        >
-                          <Edit3 className="h-4 w-4" />
-                        </Link>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
-                          onClick={() => setDeleteClientId(client.id)}
-                          title="Hapus"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        
+                        {/* Only Admin can Edit or Delete clients */}
+                        {isAdmin && (
+                          <>
+                            <Link 
+                              href={`/edit/${client.id}`}
+                              className={buttonVariants({ variant: 'ghost', size: 'icon', className: 'h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg' })}
+                              title="Edit Data"
+                            >
+                              <Edit3 className="h-4 w-4" />
+                            </Link>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
+                              onClick={() => setDeleteClientId(client.id)}
+                              title="Hapus"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </CardFooter>
                   </Card>
@@ -596,7 +638,7 @@ export default function Dashboard() {
 
       {/* Footer Branding */}
       <footer className="text-center py-4">
-        <p className="text-[10px] text-slate-400 font-mono">LeadManager v1.4 • PostgreSQL DB</p>
+        <p className="text-[10px] text-slate-400 font-mono">LeadManager v1.5 • PostgreSQL DB</p>
       </footer>
 
       {/* Client Interaction Logs Dialog */}
@@ -639,6 +681,9 @@ export default function Dashboard() {
                     
                     <div className="flex justify-between items-center text-[10px] text-slate-400 font-medium mb-0.5">
                       <span>{formatDate(log.createdAt)}</span>
+                      {log.createdBy && (
+                        <span className="font-semibold text-slate-500 italic">Oleh: {log.createdBy}</span>
+                      )}
                     </div>
                     <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100/60 font-sans">
                       {log.logText}
