@@ -697,22 +697,8 @@ export async function togglePinClient(id: number) {
       }
 
       await pool.query('UPDATE clients SET "isPinned" = TRUE, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1', [id]);
-      
-      const displayRole = session.role === 'super_admin' ? 'Super Admin' : (session.role === 'admin' ? 'Admin' : 'Staff');
-      const creatorName = `${session.username} (${displayRole})`;
-      await pool.query(
-        'INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)',
-        [id, 'Menyematkan (pin) client ke baris teratas.', session.id, creatorName]
-      );
     } else {
       await pool.query('UPDATE clients SET "isPinned" = FALSE, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1', [id]);
-
-      const displayRole = session.role === 'super_admin' ? 'Super Admin' : (session.role === 'admin' ? 'Admin' : 'Staff');
-      const creatorName = `${session.username} (${displayRole})`;
-      await pool.query(
-        'INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)',
-        [id, 'Melepas sematan (unpin) client dari baris teratas.', session.id, creatorName]
-      );
     }
 
     revalidatePath('/');
@@ -720,5 +706,34 @@ export async function togglePinClient(id: number) {
   } catch (error) {
     console.error('Error toggling pin:', error);
     return { success: false, error: 'Gagal mengubah status sematan client' };
+  }
+}
+
+export async function getGlobalHistory(limit = 10) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+
+    const query = `
+      SELECT 
+        l.id, 
+        l."clientId", 
+        l."logText", 
+        l."createdBy", 
+        l."createdAt",
+        c.name as "clientName",
+        c."businessName" as "clientBusinessName"
+      FROM client_logs l
+      JOIN clients c ON l."clientId" = c.id
+      ORDER BY l."createdAt" DESC
+      LIMIT $1
+    `;
+    const res = await pool.query(query, [limit]);
+    return { success: true, data: res.rows };
+  } catch (error) {
+    console.error('Error fetching global history:', error);
+    return { success: false, error: 'Gagal mengambil riwayat aktivitas global' };
   }
 }

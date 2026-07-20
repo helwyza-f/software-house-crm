@@ -11,6 +11,7 @@ import {
   getSession,
   logout,
   togglePinClient,
+  getGlobalHistory,
   ClientWithLogs
 } from './actions';
 import { Client } from '@/lib/db';
@@ -89,6 +90,7 @@ export default function Dashboard() {
   // Modals state
   const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [deleteClientId, setDeleteClientId] = useState<number | null>(null);
+  const [globalHistory, setGlobalHistory] = useState<any[]>([]);
   
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [selectedClientData, setSelectedClientData] = useState<ClientWithLogs | null>(null);
@@ -116,6 +118,13 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, [search]);
 
+  const fetchGlobalHistoryData = async () => {
+    const res = await getGlobalHistory(10);
+    if (res.success && res.data) {
+      setGlobalHistory(res.data);
+    }
+  };
+
   // Fetch clients function
   const fetchClients = () => {
     startTransition(async () => {
@@ -136,6 +145,7 @@ export default function Dashboard() {
         if (res.data.facets) {
           setFacets(res.data.facets);
         }
+        fetchGlobalHistoryData();
       } else {
         toast.error(res.error || 'Gagal memuat data client');
       }
@@ -209,6 +219,7 @@ export default function Dashboard() {
         setSelectedClientData(updated.data);
       }
       fetchClients();
+      fetchGlobalHistoryData();
     } else {
       toast.error(res.error || 'Gagal menambahkan log');
     }
@@ -485,196 +496,236 @@ export default function Dashboard() {
         )}
       </section>
 
-      {/* Clients List */}
-      <main className="flex-grow flex flex-col gap-6">
-        {clients.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 px-4 border border-dashed border-slate-200 rounded-2xl bg-white text-center gap-3 max-w-md mx-auto w-full">
-            <User className="h-10 w-10 text-slate-300" />
-            <div className="space-y-1">
-              <h3 className="font-semibold text-slate-900 text-sm">Belum ada client</h3>
-              <p className="text-xs text-slate-500">
-                Tidak ada data client potensial ditemukan. Silakan tambahkan data baru atau sesuaikan filter Anda.
-              </p>
+      {/* Dashboard Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-grow items-start">
+        {/* Left side: Clients List */}
+        <main className="lg:col-span-3 flex flex-col gap-6 w-full">
+          {clients.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 px-4 border border-dashed border-slate-200 rounded-2xl bg-white text-center gap-3 max-w-md mx-auto w-full">
+              <User className="h-10 w-10 text-slate-300" />
+              <div className="space-y-1">
+                <h3 className="font-semibold text-slate-900 text-sm">Belum ada client</h3>
+                <p className="text-xs text-slate-500">
+                  Tidak ada data client potensial ditemukan. Silakan tambahkan data baru atau sesuaikan filter Anda.
+                </p>
+              </div>
+              <Link 
+                href="/add"
+                className={buttonVariants({ variant: 'default', size: 'sm', className: 'rounded-xl text-sm' })}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" /> Tambah Client
+              </Link>
             </div>
-            <Link 
-              href="/add"
-              className={buttonVariants({ variant: 'default', size: 'sm', className: 'rounded-xl text-sm' })}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1" /> Tambah Client
-            </Link>
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {clients.map((client) => {
-                let customValuesObj: Record<string, string> = {};
-                try {
-                  customValuesObj = JSON.parse(client.customValues || '{}');
-                } catch {}
-                const filledCustoms = Object.entries(customValuesObj).filter(([_, val]) => val.trim());
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {clients.map((client) => {
+                  let customValuesObj: Record<string, string> = {};
+                  try {
+                    customValuesObj = JSON.parse(client.customValues || '{}');
+                  } catch {}
+                  const filledCustoms = Object.entries(customValuesObj).filter(([_, val]) => val.trim());
 
-                return (
-                  <Card key={client.id} className={cn(
-                    "border shadow-sm rounded-2xl bg-white hover:shadow-md transition-all flex flex-col justify-between",
-                    client.isPinned ? "border-amber-200/80 shadow-amber-50/50 bg-amber-50/5" : "border-slate-100"
-                  )}>
-                    <div>
-                      <CardHeader className="p-4 pb-2.5 flex flex-row items-start justify-between gap-4 space-y-0">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-slate-900 text-base">{client.name}</span>
-                            {getCategoryBadge(client.category)}
+                  return (
+                    <Card key={client.id} className={cn(
+                      "border shadow-sm rounded-2xl bg-white hover:shadow-md transition-all flex flex-col justify-between",
+                      client.isPinned ? "border-amber-200/80 shadow-amber-50/50 bg-amber-50/5" : "border-slate-100"
+                    )}>
+                      <div>
+                        <CardHeader className="p-4 pb-2.5 flex flex-row items-start justify-between gap-4 space-y-0">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-slate-900 text-base">{client.name}</span>
+                              {getCategoryBadge(client.category)}
+                            </div>
+                            <CardDescription className="flex items-center gap-1.5 text-sm text-slate-600 font-medium">
+                              <Building2 className="h-3.5 w-3.5 text-slate-400" /> {client.businessName}
+                            </CardDescription>
                           </div>
-                          <CardDescription className="flex items-center gap-1.5 text-sm text-slate-600 font-medium">
-                            <Building2 className="h-3.5 w-3.5 text-slate-400" /> {client.businessName}
-                          </CardDescription>
-                        </div>
-                      </CardHeader>
-                      
-                      <CardContent className="px-4 py-0 pb-3 text-sm space-y-2 text-slate-500">
-                        <div className="flex items-center gap-2">
-                          <Phone className="h-3.5 w-3.5 text-slate-400" />
-                          <a href={`tel:${client.phone}`} className="hover:underline text-slate-600 font-mono">
-                            {client.phone}
-                          </a>
-                        </div>
-                        {client.address && (
-                          <div className="flex items-start gap-2">
-                            <MapPin className="h-3.5 w-3.5 text-slate-400 mt-0.5" />
-                            <span className="leading-relaxed">{client.address}</span>
-                          </div>
-                        )}
-
-                        {/* Display dropdown selections */}
-                        {(client.businessType || client.infoSource) && (
-                          <div className="flex items-center gap-1.5 flex-wrap pt-1 mr-4">
-                            {client.businessType && (
-                              <Badge variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-md font-sans">
-                                💼 {client.businessType}
-                              </Badge>
-                            )}
-                            {client.infoSource && (
-                              <Badge variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-md font-sans">
-                                📢 {client.infoSource}
-                              </Badge>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Display Custom Fields */}
-                        {filledCustoms.length > 0 && (
-                          <div className="pt-2 border-t border-slate-100/80 mt-2 flex flex-col gap-1">
-                            {filledCustoms.map(([label, val]) => (
-                              <div key={label} className="flex justify-between items-center text-xs bg-slate-50 border border-slate-100/50 p-1.5 px-2 rounded-lg">
-                                <span className="font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
-                                <span className="text-slate-700 font-medium">{val}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </CardContent>
-                    </div>
-                    
-                    <CardFooter className="px-4 py-3 bg-slate-50/50 rounded-b-2xl border-t border-slate-100/50 flex items-center justify-between">
-                      <span className="text-xs text-slate-400 flex items-center gap-1">
-                        <Calendar className="h-3 w-3" /> Update: {formatDate(client.updatedAt)}
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className={cn(
-                            "h-8 w-8 rounded-lg transition-colors",
-                            client.isPinned 
-                              ? "text-amber-500 hover:text-amber-600 bg-amber-50 hover:bg-amber-100" 
-                              : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-                          )}
-                          onClick={async () => {
-                            const res = await togglePinClient(client.id);
-                            if (res.success) {
-                              toast.success(client.isPinned ? 'Sematan berhasil dilepas' : 'Client berhasil disematkan ke baris teratas');
-                              fetchClients();
-                            } else {
-                              toast.error(res.error || 'Gagal menyematkan client');
-                            }
-                          }}
-                          title={client.isPinned ? "Lepas Pin" : "Sematkan Teratas"}
-                        >
-                          <Pin className={cn("h-4 w-4", client.isPinned && "fill-amber-500")} />
-                        </Button>
-
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                          onClick={() => viewLogs(client.id)}
-                          title="Log & Keterangan"
-                        >
-                          <History className="h-4 w-4" />
-                        </Button>
+                        </CardHeader>
                         
-                        {/* Only Admin or Super Admin can Edit or Delete clients */}
-                        {isAtLeastAdmin && (
-                          <>
-                            <Link 
-                              href={`/edit/${client.id}`}
-                              className={buttonVariants({ variant: 'ghost', size: 'icon', className: 'h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg' })}
-                              title="Edit Data"
-                            >
-                              <Edit3 className="h-4 w-4" />
-                            </Link>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-8 w-8 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
-                              onClick={() => setDeleteClientId(client.id)}
-                              title="Hapus"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </>
+                        <CardContent className="px-4 py-0 pb-3 text-sm space-y-2 text-slate-500">
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-3.5 w-3.5 text-slate-400" />
+                            <a href={`tel:${client.phone}`} className="hover:underline text-slate-600 font-mono">
+                              {client.phone}
+                            </a>
+                          </div>
+                          {client.address && (
+                            <div className="flex items-start gap-2">
+                              <MapPin className="h-3.5 w-3.5 text-slate-400 mt-0.5" />
+                              <span className="leading-relaxed">{client.address}</span>
+                            </div>
+                          )}
+
+                          {/* Display dropdown selections */}
+                          {(client.businessType || client.infoSource) && (
+                            <div className="flex items-center gap-1.5 flex-wrap pt-1 mr-4">
+                              {client.businessType && (
+                                <Badge variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-md font-sans">
+                                  💼 {client.businessType}
+                                </Badge>
+                              )}
+                              {client.infoSource && (
+                                <Badge variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-md font-sans">
+                                  📢 {client.infoSource}
+                                </Badge>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Display Custom Fields */}
+                          {filledCustoms.length > 0 && (
+                            <div className="pt-2 border-t border-slate-100/80 mt-2 flex flex-col gap-1">
+                              {filledCustoms.map(([label, val]) => (
+                                <div key={label} className="flex justify-between items-center text-xs bg-slate-50 border border-slate-100/50 p-1.5 px-2 rounded-lg">
+                                  <span className="font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
+                                  <span className="text-slate-700 font-medium">{val}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </CardContent>
+                      </div>
+                      
+                      <CardFooter className="px-4 py-3 bg-slate-50/50 rounded-b-2xl border-t border-slate-100/50 flex items-center justify-between">
+                        <span className="text-xs text-slate-400 flex items-center gap-1">
+                          <Calendar className="h-3 w-3" /> Update: {formatDate(client.updatedAt)}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className={cn(
+                              "h-8 w-8 rounded-lg transition-colors",
+                              client.isPinned 
+                                ? "text-amber-500 hover:text-amber-600 bg-amber-50 hover:bg-amber-100" 
+                                : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                            )}
+                            onClick={async () => {
+                              const res = await togglePinClient(client.id);
+                              if (res.success) {
+                                toast.success(client.isPinned ? 'Sematan berhasil dilepas' : 'Client berhasil disematkan ke baris teratas');
+                                fetchClients();
+                              } else {
+                                toast.error(res.error || 'Gagal menyematkan client');
+                              }
+                            }}
+                            title={client.isPinned ? "Lepas Pin" : "Sematkan Teratas"}
+                          >
+                            <Pin className={cn("h-4 w-4", client.isPinned && "fill-amber-500")} />
+                          </Button>
+
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                            onClick={() => viewLogs(client.id)}
+                            title="Log & Keterangan"
+                          >
+                            <History className="h-4 w-4" />
+                          </Button>
+                          
+                          {/* Only Admin or Super Admin can Edit or Delete clients */}
+                          {isAtLeastAdmin && (
+                            <>
+                              <Link 
+                                href={`/edit/${client.id}`}
+                                className={buttonVariants({ variant: 'ghost', size: 'icon', className: 'h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg' })}
+                                title="Edit Data"
+                              >
+                                <Edit3 className="h-4 w-4" />
+                              </Link>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-8 w-8 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
+                                onClick={() => setDeleteClientId(client.id)}
+                                title="Hapus"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </CardFooter>
+                    </Card>
+                  );
+                })}
+              </div>
+
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between border-t border-slate-150 pt-4 pb-2 mt-2 text-xs text-slate-500">
+                  <span>
+                    Menampilkan <strong>{Math.min((page - 1) * itemsPerPage + 1, totalClients)}</strong> sampai <strong>{Math.min(page * itemsPerPage, totalClients)}</strong> dari <strong>{totalClients}</strong> client
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg text-xs"
+                      onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                      disabled={page === 1}
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-0.5" /> Prev
+                    </Button>
+                    <span className="font-medium text-slate-700 px-1">
+                      Hal {page} / {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg text-xs"
+                      onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                      disabled={page === totalPages}
+                    >
+                      Next <ChevronRight className="h-4 w-4 ml-0.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </main>
+
+        {/* Right side: Global History Timeline */}
+        <aside className="lg:col-span-1 space-y-4 w-full">
+          <Card className="border border-slate-100 shadow-sm rounded-2xl bg-white p-4 flex flex-col">
+            <h3 className="font-bold text-slate-800 text-sm border-b border-slate-100 pb-2 mb-3">Aktivitas Terbaru</h3>
+            <div className="overflow-y-auto space-y-4 pr-1 text-xs max-h-[600px] scrollbar-thin">
+              {globalHistory.length === 0 ? (
+                <p className="text-slate-400 text-center py-6">Belum ada riwayat aktivitas.</p>
+              ) : (
+                <div className="relative border-l border-slate-150 pl-3.5 ml-2 space-y-4 py-1">
+                  {globalHistory.map((history) => (
+                    <div key={history.id} className="relative">
+                      {/* Timeline dot */}
+                      <div className="absolute -left-[20px] top-1.5 h-2 w-2 bg-slate-400 rounded-full border-2 border-white" />
+                      
+                      <div className="flex justify-between items-center text-[9px] text-slate-400 font-medium mb-1">
+                        <span>{formatDate(history.createdAt)}</span>
+                        {history.createdBy && (
+                          <span className="font-semibold text-slate-500 max-w-[100px] truncate" title={history.createdBy}>
+                            Oleh: {history.createdBy.split(' ')[0]}
+                          </span>
                         )}
                       </div>
-                    </CardFooter>
-                  </Card>
-                );
-              })}
-            </div>
-
-            {/* Pagination Controls */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between border-t border-slate-150 pt-4 pb-2 mt-2 text-xs text-slate-500">
-                <span>
-                  Menampilkan <strong>{Math.min((page - 1) * itemsPerPage + 1, totalClients)}</strong> sampai <strong>{Math.min(page * itemsPerPage, totalClients)}</strong> dari <strong>{totalClients}</strong> client
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 rounded-lg text-xs"
-                    onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                    disabled={page === 1}
-                  >
-                    <ChevronLeft className="h-4 w-4 mr-0.5" /> Prev
-                  </Button>
-                  <span className="font-medium text-slate-700 px-1">
-                    Hal {page} / {totalPages}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 rounded-lg text-xs"
-                    onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                    disabled={page === totalPages}
-                  >
-                    Next <ChevronRight className="h-4 w-4 ml-0.5" />
-                  </Button>
+                      
+                      <div className="text-slate-700 bg-slate-50/50 hover:bg-slate-50 p-2.5 rounded-lg border border-slate-100/50 transition-colors">
+                        <p className="font-semibold text-slate-900 text-xs mb-0.5 truncate max-w-[200px]" title={history.clientName}>
+                          💼 {history.clientName}
+                        </p>
+                        <p className="leading-relaxed font-sans">{history.logText}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            )}
-          </>
-        )}
-      </main>
+              )}
+            </div>
+          </Card>
+        </aside>
+      </div>
 
       {/* Footer Branding */}
       <footer className="text-center py-4">
