@@ -18,9 +18,14 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
+import { DateRange } from 'react-day-picker';
 import { 
   Search, 
   Plus, 
@@ -34,9 +39,11 @@ import {
   MessageSquarePlus, 
   Filter, 
   Calendar,
+  CalendarRange,
   Settings,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  X
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -49,6 +56,7 @@ export default function Dashboard() {
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [businessTypeFilter, setBusinessTypeFilter] = useState('ALL');
   const [infoSourceFilter, setInfoSourceFilter] = useState('ALL');
+  const [date, setDate] = useState<DateRange | undefined>(undefined);
   const [showFilters, setShowFilters] = useState(false);
 
   // Facet counts state
@@ -78,6 +86,10 @@ export default function Dashboard() {
   const [selectedClientData, setSelectedClientData] = useState<ClientWithLogs | null>(null);
   const [newLogText, setNewLogText] = useState('');
 
+  // Convert date state to string format for server action query parameters (YYYY-MM-DD)
+  const startDateStr = date?.from ? format(date.from, 'yyyy-MM-dd') : '';
+  const endDateStr = date?.to ? format(date.to, 'yyyy-MM-dd') : '';
+
   // Search Debounce Effect
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -90,7 +102,16 @@ export default function Dashboard() {
   // Fetch clients function
   const fetchClients = () => {
     startTransition(async () => {
-      const res = await getClients(debouncedSearch, categoryFilter, businessTypeFilter, infoSourceFilter, page, itemsPerPage);
+      const res = await getClients(
+        debouncedSearch, 
+        categoryFilter, 
+        businessTypeFilter, 
+        infoSourceFilter, 
+        startDateStr, 
+        endDateStr, 
+        page, 
+        itemsPerPage
+      );
       if (res.success && res.data) {
         setClients(res.data.clients);
         setTotalPages(res.data.pages);
@@ -122,7 +143,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchClients();
-  }, [debouncedSearch, categoryFilter, businessTypeFilter, infoSourceFilter, page]);
+  }, [debouncedSearch, categoryFilter, businessTypeFilter, infoSourceFilter, startDateStr, endDateStr, page]);
 
   useEffect(() => {
     fetchCustomFields();
@@ -204,7 +225,7 @@ export default function Dashboard() {
     }
   };
 
-  const isFilterActive = categoryFilter !== 'ALL' || businessTypeFilter !== 'ALL' || infoSourceFilter !== 'ALL';
+  const isFilterActive = categoryFilter !== 'ALL' || businessTypeFilter !== 'ALL' || infoSourceFilter !== 'ALL' || !!date;
 
   return (
     <div className="max-w-6xl mx-auto w-full px-4 py-6 md:py-10 flex-grow flex flex-col gap-6">
@@ -258,7 +279,7 @@ export default function Dashboard() {
         {/* Collapsible Parallel Filter Panel */}
         {showFilters && (
           <Card className="border border-slate-100 shadow-inner rounded-2xl bg-slate-50/50 p-4 transition-all duration-200">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
               {/* Potensi / Kategori */}
               <div className="space-y-1">
                 <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Potensi</Label>
@@ -326,6 +347,56 @@ export default function Dashboard() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Filter Tanggal */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Tanggal Masuk</Label>
+                <div className="flex gap-1.5">
+                  <Popover>
+                    <PopoverTrigger
+                      className={cn(
+                        buttonVariants({ variant: "outline" }),
+                        "w-full bg-white h-9.5 text-xs rounded-xl border-slate-200/80 justify-start text-left font-normal px-3",
+                        !date && "text-slate-500"
+                      )}
+                    >
+                      <CalendarRange className="mr-2 h-4 w-4 text-slate-400 shrink-0" />
+                      <span className="truncate">
+                        {date?.from ? (
+                          date.to ? (
+                            <>
+                              {format(date.from, "dd MMM yyyy")} - {format(date.to, "dd MMM yyyy")}
+                            </>
+                          ) : (
+                            format(date.from, "dd MMM yyyy")
+                          )
+                        ) : (
+                          "Pilih Rentang Tanggal"
+                        )}
+                      </span>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 border border-slate-100 shadow-xl rounded-2xl bg-white" align="start">
+                      <CalendarComponent
+                        mode="range"
+                        selected={date}
+                        onSelect={(val) => { setDate(val); setPage(1); }}
+                        className="p-3"
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  {date && (
+                    <Button 
+                      variant="ghost" 
+                      onClick={() => { setDate(undefined); setPage(1); }}
+                      className="h-9.5 w-9.5 p-0 hover:bg-rose-50 text-slate-400 hover:text-rose-500 rounded-xl border border-slate-200/40"
+                      title="Reset Tanggal"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+
             </div>
           </Card>
         )}
@@ -339,7 +410,7 @@ export default function Dashboard() {
             <div className="space-y-1">
               <h3 className="font-semibold text-slate-900 text-sm">Belum ada client</h3>
               <p className="text-xs text-slate-500">
-                Tidak ada data client potensial ditemukan. Silakan tambahkan data baru.
+                Tidak ada data client potensial ditemukan. Silakan tambahkan data baru atau sesuaikan filter Anda.
               </p>
             </div>
             <Link 
@@ -492,7 +563,7 @@ export default function Dashboard() {
 
       {/* Footer Branding */}
       <footer className="text-center py-4">
-        <p className="text-[10px] text-slate-400 font-mono">LeadManager v1.3 • PostgreSQL DB</p>
+        <p className="text-[10px] text-slate-400 font-mono">LeadManager v1.4 • PostgreSQL DB</p>
       </footer>
 
       {/* Client Interaction Logs Dialog */}

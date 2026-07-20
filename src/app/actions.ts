@@ -12,12 +12,14 @@ export async function getClients(
   category = '', 
   businessType = '',
   infoSource = '',
+  startDate = '',
+  endDate = '',
   page = 1, 
   limit = 12
 ) {
   try {
     // Helper to build WHERE clause
-    const buildWhere = (s: string, cat: string, bus: string, info: string) => {
+    const buildWhere = (s: string, cat: string, bus: string, info: string, sDate: string, eDate: string) => {
       let where = ' WHERE 1=1';
       const params: (string | number)[] = [];
       let pCount = 1;
@@ -47,11 +49,23 @@ export async function getClients(
         pCount += 1;
       }
 
+      if (sDate) {
+        where += ` AND "createdAt"::date >= $${pCount}::date`;
+        params.push(sDate);
+        pCount += 1;
+      }
+
+      if (eDate) {
+        where += ` AND "createdAt"::date <= $${pCount}::date`;
+        params.push(eDate);
+        pCount += 1;
+      }
+
       return { where, params, nextParamIndex: pCount };
     };
 
     // 1. Get main client lists matching all active filters
-    const { where: mainWhere, params: mainParams, nextParamIndex } = buildWhere(search, category, businessType, infoSource);
+    const { where: mainWhere, params: mainParams, nextParamIndex } = buildWhere(search, category, businessType, infoSource, startDate, endDate);
     
     // Get total count for pagination
     const countRes = await pool.query(`SELECT COUNT(*) as count FROM clients${mainWhere}`, mainParams);
@@ -66,7 +80,7 @@ export async function getClients(
     const clients = res.rows as Client[];
 
     // 2. Fetch facet counts for Categories (ignoring active category filter)
-    const { where: catWhere, params: catParams } = buildWhere(search, 'ALL', businessType, infoSource);
+    const { where: catWhere, params: catParams } = buildWhere(search, 'ALL', businessType, infoSource, startDate, endDate);
     const catCountsRes = await pool.query(`SELECT category, COUNT(*) as count FROM clients${catWhere} GROUP BY category`, catParams);
     const catTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${catWhere}`, catParams);
     
@@ -76,7 +90,7 @@ export async function getClients(
     });
 
     // 3. Fetch facet counts for Business Types (ignoring active businessType filter)
-    const { where: busWhere, params: busParams } = buildWhere(search, category, 'ALL', infoSource);
+    const { where: busWhere, params: busParams } = buildWhere(search, category, 'ALL', infoSource, startDate, endDate);
     const busCountsRes = await pool.query(`SELECT "businessType", COUNT(*) as count FROM clients${busWhere} GROUP BY "businessType"`, busParams);
     const busTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${busWhere}`, busParams);
     
@@ -86,7 +100,7 @@ export async function getClients(
     });
 
     // 4. Fetch facet counts for Info Sources (ignoring active infoSource filter)
-    const { where: infoWhere, params: infoParams } = buildWhere(search, category, businessType, 'ALL');
+    const { where: infoWhere, params: infoParams } = buildWhere(search, category, businessType, 'ALL', startDate, endDate);
     const infoCountsRes = await pool.query(`SELECT "infoSource", COUNT(*) as count FROM clients${infoWhere} GROUP BY "infoSource"`, infoParams);
     const infoTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${infoWhere}`, infoParams);
     
