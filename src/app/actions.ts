@@ -1,6 +1,6 @@
 'use server';
 
-import { pool, Client, ClientLog, hashPassword } from '@/lib/db';
+import { pool, Client, ClientLog, hashPassword, generateSalt } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
@@ -28,7 +28,7 @@ export async function getSession() {
     if (signature !== expectedSig) return null;
 
     const payload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf8'));
-    return payload as { id: number; username: string; role: 'admin' | 'staff' };
+    return payload as { id: number; username: string; role: 'super_admin' | 'admin' | 'staff' };
   } catch {
     return null;
   }
@@ -74,6 +74,116 @@ export async function logout() {
   const cookieStore = await cookies();
   cookieStore.delete('session');
   return { success: true };
+}
+
+// ==========================================
+// USER MANAGEMENT ACTIONS (SUPER ADMIN ONLY)
+// ==========================================
+
+export async function getUsers() {
+  try {
+    const session = await getSession();
+    if (!session || session.role !== 'super_admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Super Admin yang dapat mengakses manajemen akun' };
+    }
+
+    const res = await pool.query('SELECT id, username, role, "createdAt" FROM users ORDER BY id ASC');
+    return { success: true, data: res.rows };
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    return { success: false, error: 'Gagal mengambil data akun pengguna' };
+  }
+}
+
+export async function createUserAccount(usernameInput: string, passwordInput: string, roleInput: 'admin' | 'staff' | 'super_admin') {
+  try {
+    const session = await getSession();
+    if (!session || session.role !== 'super_admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Super Admin yang dapat membuat akun baru' };
+    }
+
+    const username = usernameInput.trim().toLowerCase();
+    if (!username || !passwordInput) {
+      return { success: false, error: 'Username dan password wajib diisi' };
+    }
+
+    // Check duplicate
+    const checkRes = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
+    if (checkRes.rows.length > 0) {
+      return { success: false, error: 'Username sudah digunakan' };
+    }
+
+    const salt = generateSalt();
+    const hash = hashPassword(passwordInput, salt);
+
+    await pool.query(
+      'INSERT INTO users (username, password_hash, salt, role) VALUES ($1, $2, $3, $4)',
+      [username, hash, salt, roleInput]
+    );
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error creating user account:', error);
+    return { success: false, error: 'Gagal membuat akun baru' };
+  }
+}
+
+export async function updateUserAccount(id: number, usernameInput: string, passwordInput: string | null, roleInput: 'admin' | 'staff' | 'super_admin') {
+  try {
+    const session = await getSession();
+    if (!session || session.role !== 'super_admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Super Admin yang dapat mengubah akun' };
+    }
+
+    const username = usernameInput.trim().toLowerCase();
+    if (!username) {
+      return { success: false, error: 'Username tidak boleh kosong' };
+    }
+
+    // Check duplicate for other users
+    const checkRes = await pool.query('SELECT id FROM users WHERE username = $1 AND id != $2', [username, id]);
+    if (checkRes.rows.length > 0) {
+      return { success: false, error: 'Username sudah digunakan oleh akun lain' };
+    }
+
+    if (passwordInput && passwordInput.trim()) {
+      const salt = generateSalt();
+      const hash = hashPassword(passwordInput, salt);
+      await pool.query(
+        'UPDATE users SET username = $1, password_hash = $2, salt = $3, role = $4 WHERE id = $5',
+        [username, hash, salt, roleInput, id]
+      );
+    } else {
+      await pool.query(
+        'UPDATE users SET username = $1, role = $2 WHERE id = $3',
+        [username, roleInput, id]
+      );
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error updating user account:', error);
+    return { success: false, error: 'Gagal memperbarui akun' };
+  }
+}
+
+export async function deleteUserAccount(id: number) {
+  try {
+    const session = await getSession();
+    if (!session || session.role !== 'super_admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Super Admin yang dapat menghapus akun' };
+    }
+
+    if (session.id === id) {
+      return { success: false, error: 'Akses Ditolak: Anda tidak dapat menghapus akun Anda sendiri' };
+    }
+
+    await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting user account:', error);
+    return { success: false, error: 'Gagal menghapus akun' };
+  }
 }
 
 // ==========================================
@@ -262,7 +372,8 @@ export async function createClient(
     const clientRes = await dbClient.query(clientQuery, clientParams);
     const clientId = clientRes.rows[0].id as number;
 
-    const creatorName = `${session.username} (${session.role === 'admin' ? 'Admin' : 'Staff'})`;
+    const displayRole = session.role === 'super_admin' ? 'Super Admin' : (session.role === 'admin' ? 'Admin' : 'Staff');
+    const creatorName = `${session.username} (${displayRole})`;
 
     // 1. Write registration audit log
     const auditText = `Mendaftarkan client baru ke dalam sistem.`;
@@ -310,8 +421,8 @@ export async function updateClient(
     if (!session) {
       return { success: false, error: 'Harus login terlebih dahulu' };
     }
-    if (session.role !== 'admin') {
-      return { success: false, error: 'Akses Ditolak: Hanya Admin yang dapat mengedit profil client' };
+    if (session.role !== 'admin' && session.role !== 'super_admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin atau Super Admin yang dapat mengedit profil client' };
     }
 
     // Retrieve old data to compare differences for audit logging
@@ -351,7 +462,8 @@ export async function updateClient(
     if (oldClient.infoSource !== clientData.infoSource) changes.push(`Sumber Info: "${oldClient.infoSource || 'Kosong'}" ➔ "${clientData.infoSource || 'Kosong'}"`);
 
     if (changes.length > 0) {
-      const creatorName = `${session.username} (Admin)`;
+      const displayRole = session.role === 'super_admin' ? 'Super Admin' : 'Admin';
+      const creatorName = `${session.username} (${displayRole})`;
       const auditText = `Mengubah data client: ${changes.join(', ')}`;
       await pool.query(
         'INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)',
@@ -373,8 +485,8 @@ export async function deleteClient(id: number) {
     if (!session) {
       return { success: false, error: 'Harus login terlebih dahulu' };
     }
-    if (session.role !== 'admin') {
-      return { success: false, error: 'Akses Ditolak: Hanya Admin yang dapat menghapus data client' };
+    if (session.role !== 'admin' && session.role !== 'super_admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin atau Super Admin yang dapat menghapus data client' };
     }
 
     await pool.query('DELETE FROM clients WHERE id = $1', [id]);
@@ -393,7 +505,8 @@ export async function addClientLog(clientId: number, logText: string) {
       return { success: false, error: 'Harus login terlebih dahulu' };
     }
 
-    const creatorName = `${session.username} (${session.role === 'admin' ? 'Admin' : 'Staff'})`;
+    const displayRole = session.role === 'super_admin' ? 'Super Admin' : (session.role === 'admin' ? 'Admin' : 'Staff');
+    const creatorName = `${session.username} (${displayRole})`;
 
     const query = `
       INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt")
@@ -435,8 +548,8 @@ export async function saveCustomFields(fields: string[]) {
     if (!session) {
       return { success: false, error: 'Harus login terlebih dahulu' };
     }
-    if (session.role !== 'admin') {
-      return { success: false, error: 'Akses Ditolak: Hanya Admin yang dapat mengubah variabel custom' };
+    if (session.role !== 'admin' && session.role !== 'super_admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin atau Super Admin yang dapat mengubah variabel custom' };
     }
 
     const query = `
@@ -481,8 +594,8 @@ export async function addGlobalOption(type: 'businessType' | 'infoSource', value
     if (!session) {
       return { success: false, error: 'Harus login terlebih dahulu' };
     }
-    if (session.role !== 'admin') {
-      return { success: false, error: 'Akses Ditolak: Hanya Admin yang dapat menambah opsi' };
+    if (session.role !== 'admin' && session.role !== 'super_admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin atau Super Admin yang dapat menambah opsi' };
     }
 
     const valTrim = value.trim();
@@ -521,8 +634,8 @@ export async function deleteGlobalOption(type: 'businessType' | 'infoSource', va
     if (!session) {
       return { success: false, error: 'Harus login terlebih dahulu' };
     }
-    if (session.role !== 'admin') {
-      return { success: false, error: 'Akses Ditolak: Hanya Admin yang dapat menghapus opsi' };
+    if (session.role !== 'admin' && session.role !== 'super_admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin atau Super Admin yang dapat menghapus opsi' };
     }
 
     const checkQuery = type === 'businessType' 

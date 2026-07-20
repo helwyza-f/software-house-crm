@@ -38,6 +38,7 @@ import {
   Edit3, 
   Trash2, 
   User, 
+  Users,
   MessageSquarePlus, 
   Filter, 
   Calendar,
@@ -51,7 +52,7 @@ import {
 import Link from 'next/link';
 
 export default function Dashboard() {
-  const [userSession, setUserSession] = useState<{ id: number; username: string; role: 'admin' | 'staff' } | null>(null);
+  const [userSession, setUserSession] = useState<{ id: number; username: string; role: 'super_admin' | 'admin' | 'staff' } | null>(null);
   
   const [clients, setClients] = useState<Client[]>([]);
   const [search, setSearch] = useState('');
@@ -246,7 +247,8 @@ export default function Dashboard() {
   };
 
   const isFilterActive = categoryFilter !== 'ALL' || businessTypeFilter !== 'ALL' || infoSourceFilter !== 'ALL' || !!date;
-  const isAdmin = userSession?.role === 'admin';
+  const isAtLeastAdmin = userSession?.role === 'admin' || userSession?.role === 'super_admin';
+  const isSuperAdmin = userSession?.role === 'super_admin';
 
   return (
     <div className="max-w-6xl mx-auto w-full px-4 py-6 md:py-10 flex-grow flex flex-col gap-6">
@@ -264,14 +266,24 @@ export default function Dashboard() {
             {/* User Session status */}
             <div className="flex items-center gap-2 text-xs bg-slate-100 border border-slate-200/50 p-1 px-3 rounded-full text-slate-600 font-medium">
               <User className="h-3.5 w-3.5 text-slate-400" />
-              <span>{userSession?.username} ({userSession?.role === 'admin' ? 'Admin' : 'Staff'})</span>
+              <span>{userSession?.username} ({userSession?.role === 'super_admin' ? 'Super Admin' : (userSession?.role === 'admin' ? 'Admin' : 'Staff')})</span>
               <span className="text-slate-300">|</span>
               <button onClick={handleLogout} className="hover:text-rose-600 font-bold flex items-center gap-1 select-none">
                 <LogOut className="h-3 w-3" /> Keluar
               </button>
             </div>
             
-            {isAdmin && (
+            {isSuperAdmin && (
+              <Link 
+                href="/users" 
+                title="Manajemen Akun Pengguna"
+                className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
+              >
+                <Users className="h-4.5 w-4.5" />
+              </Link>
+            )}
+            
+            {isAtLeastAdmin && (
               <Link 
                 href="/settings" 
                 title="Konfigurasi Variabel"
@@ -573,8 +585,8 @@ export default function Dashboard() {
                           <History className="h-4 w-4" />
                         </Button>
                         
-                        {/* Only Admin can Edit or Delete clients */}
-                        {isAdmin && (
+                        {/* Only Admin or Super Admin can Edit or Delete clients */}
+                        {isAtLeastAdmin && (
                           <>
                             <Link 
                               href={`/edit/${client.id}`}

@@ -60,11 +60,18 @@ export default async function proxy(request: NextRequest) {
 
     // Decode base64 payload in Edge runtime
     const payloadJson = atob(payloadBase64);
-    const payload = JSON.parse(payloadJson) as { id: number; username: string; role: 'admin' | 'staff' };
+    const payload = JSON.parse(payloadJson) as { id: number; username: string; role: 'super_admin' | 'admin' | 'staff' };
 
-    // RBAC: staff is not allowed to access /settings or /edit/[id]
-    if (payload.role !== 'admin') {
-      if (path.startsWith('/settings') || path.startsWith('/edit')) {
+    // RBAC: staff is not allowed to access /settings, /edit/[id], or /users
+    if (payload.role === 'staff') {
+      if (path.startsWith('/settings') || path.startsWith('/edit') || path.startsWith('/users')) {
+        return NextResponse.redirect(new URL('/', request.url));
+      }
+    }
+
+    // RBAC: admin is not allowed to access /users (only super_admin allowed)
+    if (payload.role === 'admin') {
+      if (path.startsWith('/users')) {
         return NextResponse.redirect(new URL('/', request.url));
       }
     }
