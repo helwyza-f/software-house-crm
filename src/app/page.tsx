@@ -54,7 +54,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
-export default function Dashboard() {
+export default function Dashboard({ searchParams }: { searchParams: Promise<{ openLogs?: string }> }) {
   const [userSession, setUserSession] = useState<{ id: number; username: string; role: 'super_admin' | 'admin' | 'staff' } | null>(null);
   
   const [clients, setClients] = useState<Client[]>([]);
@@ -108,6 +108,20 @@ export default function Dashboard() {
     }
     loadSession();
   }, []);
+
+  // Auto-open logs if openLogs query parameter is present
+  useEffect(() => {
+    async function checkQueryParams() {
+      const params = await searchParams;
+      if (params?.openLogs) {
+        const clientId = parseInt(params.openLogs, 10);
+        if (!isNaN(clientId)) {
+          viewLogs(clientId);
+        }
+      }
+    }
+    checkQueryParams();
+  }, [searchParams]);
 
   // Search Debounce Effect
   useEffect(() => {
