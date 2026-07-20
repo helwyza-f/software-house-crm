@@ -126,7 +126,16 @@ const initDb = async () => {
       CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
     `);
 
-    // 4. Seed initial accounts if empty
+    // 4. Clean up legacy pin/unpin activity logs
+    await client.query(`
+      DELETE FROM client_logs 
+      WHERE "logText" = 'Menyematkan (pin) client ke baris teratas.' 
+         OR "logText" = 'Melepas sematan (unpin) client dari baris teratas.'
+         OR "logText" LIKE '%Menyematkan (pin)%' 
+         OR "logText" LIKE '%Melepas sematan (unpin)%';
+    `);
+
+    // 5. Seed initial accounts if empty
     const userCountRes = await client.query('SELECT COUNT(*) as count FROM users');
     const userCount = parseInt(userCountRes.rows[0].count, 10);
     if (userCount === 0) {
