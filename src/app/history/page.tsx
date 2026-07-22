@@ -43,8 +43,11 @@ export default function HistoryPage() {
     loadData();
   }, []);
 
-  const formatDate = (dateStr: string) => {
+  const formatDate = (dateInput: any) => {
     try {
+      if (!dateInput) return '';
+      let dateStr = dateInput instanceof Date ? dateInput.toISOString() : String(dateInput);
+      
       // Discard timezone indicators to treat database time as local
       const cleaned = dateStr.replace('Z', '').replace('T', ' ');
       const d = new Date(cleaned);
@@ -56,7 +59,7 @@ export default function HistoryPage() {
         minute: '2-digit'
       });
     } catch {
-      return dateStr;
+      return '';
     }
   };
 
