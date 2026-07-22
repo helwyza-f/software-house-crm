@@ -263,9 +263,12 @@ function DashboardContent() {
       if (!dateInput) return '';
       let dateStr = dateInput instanceof Date ? dateInput.toISOString() : String(dateInput);
       
-      // Discard timezone indicators to treat database time as local
-      const cleaned = dateStr.replace('Z', '').replace('T', ' ');
-      const d = new Date(cleaned);
+      // Ensure UTC representation is parsed as UTC by appending 'Z' if missing timezone offset
+      if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-')) {
+        dateStr = dateStr.replace(' ', 'T') + 'Z';
+      }
+      
+      const d = new Date(dateStr);
       return d.toLocaleDateString('id-ID', {
         day: '2-digit',
         month: 'short',
