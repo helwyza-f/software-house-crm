@@ -192,7 +192,7 @@ export default function Dashboard({ searchParams }: { searchParams: Promise<{ op
   }, []);
 
   // Load client logs
-  const viewLogs = async (clientId: number) => {
+  async function viewLogs(clientId: number) {
     setSelectedClientId(clientId);
     const res = await getClientWithLogs(clientId);
     if (res.success && res.data) {
@@ -201,7 +201,7 @@ export default function Dashboard({ searchParams }: { searchParams: Promise<{ op
     } else {
       toast.error(res.error || 'Gagal memuat log client');
     }
-  };
+  }
 
   // Delete client handler
   const handleDelete = async (id: number) => {
@@ -260,7 +260,7 @@ export default function Dashboard({ searchParams }: { searchParams: Promise<{ op
 
   const formatDate = (dateStr: string) => {
     try {
-      const d = new Date(dateStr + 'Z');
+      const d = new Date(dateStr);
       return d.toLocaleDateString('id-ID', {
         day: '2-digit',
         month: 'short',
