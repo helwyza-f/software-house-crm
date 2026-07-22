@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, startTransition } from 'react';
+import React, { useState, useEffect, startTransition, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   getClients, 
   getClientWithLogs, 
@@ -54,7 +55,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
-export default function Dashboard({ searchParams }: { searchParams: Promise<{ openLogs?: string }> }) {
+function DashboardContent() {
   const [userSession, setUserSession] = useState<{ id: number; username: string; role: 'super_admin' | 'admin' | 'staff' } | null>(null);
   
   const [clients, setClients] = useState<Client[]>([]);
@@ -109,19 +110,18 @@ export default function Dashboard({ searchParams }: { searchParams: Promise<{ op
     loadSession();
   }, []);
 
+  const searchParamsHook = useSearchParams();
+
   // Auto-open logs if openLogs query parameter is present
   useEffect(() => {
-    async function checkQueryParams() {
-      const params = await searchParams;
-      if (params?.openLogs) {
-        const clientId = parseInt(params.openLogs, 10);
-        if (!isNaN(clientId)) {
-          viewLogs(clientId);
-        }
+    const openLogsId = searchParamsHook.get('openLogs');
+    if (openLogsId) {
+      const clientId = parseInt(openLogsId, 10);
+      if (!isNaN(clientId)) {
+        viewLogs(clientId);
       }
     }
-    checkQueryParams();
-  }, [searchParams]);
+  }, [searchParamsHook]);
 
   // Search Debounce Effect
   useEffect(() => {
@@ -260,7 +260,9 @@ export default function Dashboard({ searchParams }: { searchParams: Promise<{ op
 
   const formatDate = (dateStr: string) => {
     try {
-      const d = new Date(dateStr);
+      // Discard timezone indicators to treat database time as local
+      const cleaned = dateStr.replace('Z', '').replace('T', ' ');
+      const d = new Date(cleaned);
       return d.toLocaleDateString('id-ID', {
         day: '2-digit',
         month: 'short',
@@ -793,5 +795,13 @@ export default function Dashboard({ searchParams }: { searchParams: Promise<{ op
       </AlertDialog>
 
     </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <Suspense fallback={<div className="max-w-6xl mx-auto p-4 text-slate-500 animate-pulse text-sm font-medium">Memuat Dasbor...</div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }

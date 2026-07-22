@@ -23,7 +23,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:crm_secure_pass_198@db:5432/crm
       - PORT=3000
-    # Port 3000 is exposed only within the Docker network, Nginx/Caddy will handle public ingress
+    ports:
+      - "127.0.0.1:3000:3000"
 
   caddy:
     image: caddy:2-alpine

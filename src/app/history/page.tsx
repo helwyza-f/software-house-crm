@@ -45,7 +45,9 @@ export default function HistoryPage() {
 
   const formatDate = (dateStr: string) => {
     try {
-      const d = new Date(dateStr);
+      // Discard timezone indicators to treat database time as local
+      const cleaned = dateStr.replace('Z', '').replace('T', ' ');
+      const d = new Date(cleaned);
       return d.toLocaleDateString('id-ID', {
         day: '2-digit',
         month: 'short',
