@@ -257,7 +257,7 @@ export async function getClients(
       }
 
       if (limitId !== undefined) {
-        where += ` AND ("createdById" = $${pCount} OR "createdById" IS NULL)`;
+        where += ` AND "createdById" = $${pCount}`;
         params.push(limitId);
         pCount += 1;
       }
