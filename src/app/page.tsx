@@ -617,9 +617,16 @@ function DashboardContent() {
                     </div>
                     
                     <CardFooter className="px-4 py-3 bg-slate-50/50 rounded-b-2xl border-t border-slate-100/50 flex items-center justify-between">
-                      <span className="text-xs text-slate-400 flex items-center gap-1">
-                        <Calendar className="h-3 w-3" /> Update: {formatDate(client.updatedAt)}
-                      </span>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs text-slate-400 flex items-center gap-1">
+                          <Calendar className="h-3 w-3" /> Update: {formatDate(client.updatedAt)}
+                        </span>
+                        {isSuperAdmin && (
+                          <span className="text-[9px] text-slate-400/80 italic font-mono pl-4">
+                            Dibuat oleh: {client.createdByUsername || 'System'}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5">
                         <Button 
                           variant="ghost" 

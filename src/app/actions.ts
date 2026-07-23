@@ -87,7 +87,7 @@ export async function getUsers() {
       return { success: false, error: 'Akses Ditolak: Hanya Super Admin yang dapat mengakses manajemen akun' };
     }
 
-    const res = await pool.query('SELECT id, username, role, "createdAt" FROM users ORDER BY id ASC');
+    const res = await pool.query('SELECT id, username, role, "canViewAll", "createdAt" FROM users ORDER BY id ASC');
     return { success: true, data: res.rows };
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -95,7 +95,7 @@ export async function getUsers() {
   }
 }
 
-export async function createUserAccount(usernameInput: string, passwordInput: string, roleInput: 'admin' | 'staff' | 'super_admin') {
+export async function createUserAccount(usernameInput: string, passwordInput: string, roleInput: 'admin' | 'staff' | 'super_admin', canViewAllInput = true) {
   try {
     const session = await getSession();
     if (!session || session.role !== 'super_admin') {
@@ -117,8 +117,8 @@ export async function createUserAccount(usernameInput: string, passwordInput: st
     const hash = hashPassword(passwordInput, salt);
 
     await pool.query(
-      'INSERT INTO users (username, password_hash, salt, role) VALUES ($1, $2, $3, $4)',
-      [username, hash, salt, roleInput]
+      'INSERT INTO users (username, password_hash, salt, role, "canViewAll") VALUES ($1, $2, $3, $4, $5)',
+      [username, hash, salt, roleInput, canViewAllInput]
     );
 
     return { success: true };
@@ -128,7 +128,7 @@ export async function createUserAccount(usernameInput: string, passwordInput: st
   }
 }
 
-export async function updateUserAccount(id: number, usernameInput: string, passwordInput: string | null, roleInput: 'admin' | 'staff' | 'super_admin') {
+export async function updateUserAccount(id: number, usernameInput: string, passwordInput: string | null, roleInput: 'admin' | 'staff' | 'super_admin', canViewAllInput = true) {
   try {
     const session = await getSession();
     if (!session || session.role !== 'super_admin') {
@@ -150,13 +150,13 @@ export async function updateUserAccount(id: number, usernameInput: string, passw
       const salt = generateSalt();
       const hash = hashPassword(passwordInput, salt);
       await pool.query(
-        'UPDATE users SET username = $1, password_hash = $2, salt = $3, role = $4 WHERE id = $5',
-        [username, hash, salt, roleInput, id]
+        'UPDATE users SET username = $1, password_hash = $2, salt = $3, role = $4, "canViewAll" = $5 WHERE id = $6',
+        [username, hash, salt, roleInput, canViewAllInput, id]
       );
     } else {
       await pool.query(
-        'UPDATE users SET username = $1, role = $2 WHERE id = $3',
-        [username, roleInput, id]
+        'UPDATE users SET username = $1, role = $2, "canViewAll" = $3 WHERE id = $4',
+        [username, roleInput, canViewAllInput, id]
       );
     }
 
@@ -201,8 +201,20 @@ export async function getClients(
   limit = 12
 ) {
   try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+
+    const userRes = await pool.query('SELECT role, "canViewAll" FROM users WHERE id = $1', [session.id]);
+    if (userRes.rows.length === 0) {
+      return { success: false, error: 'User tidak ditemukan' };
+    }
+    const dbUser = userRes.rows[0];
+    const userLimitId = (dbUser.role !== 'super_admin' && !dbUser.canViewAll) ? session.id : undefined;
+
     // Helper to build WHERE clause
-    const buildWhere = (s: string, cat: string, bus: string, info: string, sDate: string, eDate: string) => {
+    const buildWhere = (s: string, cat: string, bus: string, info: string, sDate: string, eDate: string, limitId?: number) => {
       let where = ' WHERE 1=1';
       const params: (string | number)[] = [];
       let pCount = 1;
@@ -244,11 +256,17 @@ export async function getClients(
         pCount += 1;
       }
 
+      if (limitId !== undefined) {
+        where += ` AND ("createdById" = $${pCount} OR "createdById" IS NULL)`;
+        params.push(limitId);
+        pCount += 1;
+      }
+
       return { where, params, nextParamIndex: pCount };
     };
 
     // 1. Get main client lists matching all active filters
-    const { where: mainWhere, params: mainParams, nextParamIndex } = buildWhere(search, category, businessType, infoSource, startDate, endDate);
+    const { where: mainWhere, params: mainParams, nextParamIndex } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId);
     
     // Get total count for pagination
     const countRes = await pool.query(`SELECT COUNT(*) as count FROM clients${mainWhere}`, mainParams);
@@ -257,13 +275,20 @@ export async function getClients(
     // Fetch paginated records
     const offset = (page - 1) * limit;
     const paginatedParams = [...mainParams, limit, offset];
-    const query = `SELECT * FROM clients${mainWhere} ORDER BY "isPinned" DESC, "updatedAt" DESC LIMIT $${nextParamIndex} OFFSET $${nextParamIndex + 1}`;
+    const query = `
+      SELECT clients.*, u.username as "createdByUsername" 
+      FROM clients 
+      LEFT JOIN users u ON clients."createdById" = u.id 
+      ${mainWhere} 
+      ORDER BY clients."isPinned" DESC, clients."updatedAt" DESC 
+      LIMIT $${nextParamIndex} OFFSET $${nextParamIndex + 1}
+    `;
     
     const res = await pool.query(query, paginatedParams);
     const clients = res.rows as Client[];
 
     // 2. Fetch facet counts for Categories (ignoring active category filter)
-    const { where: catWhere, params: catParams } = buildWhere(search, 'ALL', businessType, infoSource, startDate, endDate);
+    const { where: catWhere, params: catParams } = buildWhere(search, 'ALL', businessType, infoSource, startDate, endDate, userLimitId);
     const catCountsRes = await pool.query(`SELECT category, COUNT(*) as count FROM clients${catWhere} GROUP BY category`, catParams);
     const catTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${catWhere}`, catParams);
     
@@ -273,7 +298,7 @@ export async function getClients(
     });
 
     // 3. Fetch facet counts for Business Types (ignoring active businessType filter)
-    const { where: busWhere, params: busParams } = buildWhere(search, category, 'ALL', infoSource, startDate, endDate);
+    const { where: busWhere, params: busParams } = buildWhere(search, category, 'ALL', infoSource, startDate, endDate, userLimitId);
     const busCountsRes = await pool.query(`SELECT "businessType", COUNT(*) as count FROM clients${busWhere} GROUP BY "businessType"`, busParams);
     const busTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${busWhere}`, busParams);
     
@@ -283,7 +308,7 @@ export async function getClients(
     });
 
     // 4. Fetch facet counts for Info Sources (ignoring active infoSource filter)
-    const { where: infoWhere, params: infoParams } = buildWhere(search, category, businessType, 'ALL', startDate, endDate);
+    const { where: infoWhere, params: infoParams } = buildWhere(search, category, businessType, 'ALL', startDate, endDate, userLimitId);
     const infoCountsRes = await pool.query(`SELECT "infoSource", COUNT(*) as count FROM clients${infoWhere} GROUP BY "infoSource"`, infoParams);
     const infoTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${infoWhere}`, infoParams);
     
@@ -354,8 +379,8 @@ export async function createClient(
     await dbClient.query('BEGIN');
 
     const clientQuery = `
-      INSERT INTO clients (name, phone, "businessName", address, category, "businessType", "infoSource", "customValues", "createdAt", "updatedAt")
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO clients (name, phone, "businessName", address, category, "businessType", "infoSource", "customValues", "createdById", "createdAt", "updatedAt")
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING id
     `;
     const clientParams = [
@@ -366,7 +391,8 @@ export async function createClient(
       clientData.category,
       clientData.businessType || '',
       clientData.infoSource || '',
-      clientData.customValues || '{}'
+      clientData.customValues || '{}',
+      session.id
     ];
     
     const clientRes = await dbClient.query(clientQuery, clientParams);

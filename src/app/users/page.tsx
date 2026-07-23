@@ -23,6 +23,7 @@ interface UserData {
   id: number;
   username: string;
   role: 'super_admin' | 'admin' | 'staff';
+  canViewAll: boolean;
   createdAt: string;
 }
 
@@ -37,6 +38,7 @@ export default function UserManagementPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<'admin' | 'staff' | 'super_admin'>('staff');
+  const [canViewAll, setCanViewAll] = useState(true);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
 
   const loadData = async () => {
@@ -71,7 +73,7 @@ export default function UserManagementPage() {
     setActionLoading(true);
     if (editingUserId) {
       // Update existing account
-      const res = await updateUserAccount(editingUserId, cleanUsername, password || null, role);
+      const res = await updateUserAccount(editingUserId, cleanUsername, password || null, role, canViewAll);
       if (res.success) {
         toast.success(`Akun "${cleanUsername}" berhasil diperbarui`);
         resetForm();
@@ -86,7 +88,7 @@ export default function UserManagementPage() {
         setActionLoading(false);
         return;
       }
-      const res = await createUserAccount(cleanUsername, password, role);
+      const res = await createUserAccount(cleanUsername, password, role, canViewAll);
       if (res.success) {
         toast.success(`Akun "${cleanUsername}" berhasil dibuat`);
         resetForm();
@@ -103,6 +105,7 @@ export default function UserManagementPage() {
     setUsername(user.username);
     setPassword('');
     setRole(user.role);
+    setCanViewAll(user.canViewAll !== false);
   };
 
   const handleDelete = async (id: number, uName: string) => {
@@ -129,6 +132,7 @@ export default function UserManagementPage() {
     setUsername('');
     setPassword('');
     setRole('staff');
+    setCanViewAll(true);
   };
 
   const formatDate = (dateStr: string) => {
@@ -233,6 +237,21 @@ export default function UserManagementPage() {
               </Select>
             </div>
 
+            {role !== 'super_admin' && (
+              <div className="flex items-center gap-2 pt-1.5 pb-1">
+                <input 
+                  type="checkbox" 
+                  id="canViewAll" 
+                  checked={canViewAll} 
+                  onChange={(e) => setCanViewAll(e.target.checked)}
+                  className="h-4.5 w-4.5 rounded border-slate-350 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                />
+                <Label htmlFor="canViewAll" className="text-sm font-semibold text-slate-700 cursor-pointer">
+                  Dapat Melihat Semua Client (Kolaborasi)
+                </Label>
+              </div>
+            )}
+
             <div className="flex gap-2 pt-2">
               <Button type="submit" disabled={actionLoading} className="flex-grow text-base h-11 rounded-xl shadow-sm">
                 {editingUserId ? 'Simpan Pembaruan' : 'Buat Akun'}
@@ -271,6 +290,13 @@ export default function UserManagementPage() {
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-slate-800">{user.username}</span>
                     {getRoleBadge(user.role)}
+                    {user.role !== 'super_admin' && (
+                      user.canViewAll !== false ? (
+                        <Badge variant="outline" className="text-[10px] border-emerald-200 bg-emerald-50 text-emerald-700">Akses Semua Client</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] border-amber-200 bg-amber-50 text-amber-700">Hanya Client Sendiri</Badge>
+                      )
+                    )}
                     {currentUser?.id === user.id && (
                       <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold">Aktif</span>
                     )}

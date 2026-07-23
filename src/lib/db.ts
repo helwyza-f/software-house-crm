@@ -14,6 +14,8 @@ export interface Client {
   isPinned?: boolean;
   createdAt: string;
   updatedAt: string;
+  createdById?: number | null;
+  createdByUsername?: string;
 }
 
 export interface ClientLog {
@@ -31,6 +33,7 @@ export interface User {
   passwordHash: string;
   salt: string;
   role: 'super_admin' | 'admin' | 'staff';
+  canViewAll: boolean;
   createdAt: string;
 }
 
@@ -74,6 +77,7 @@ const initDb = async () => {
         password_hash VARCHAR(255) NOT NULL,
         salt VARCHAR(255) NOT NULL,
         role VARCHAR(50) NOT NULL CHECK(role IN ('super_admin', 'admin', 'staff')) DEFAULT 'staff',
+        "canViewAll" BOOLEAN DEFAULT TRUE,
         "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -87,6 +91,7 @@ const initDb = async () => {
         "businessType" VARCHAR(255),
         "infoSource" VARCHAR(255),
         "customValues" TEXT DEFAULT '{}',
+        "createdById" INTEGER REFERENCES users(id) ON DELETE SET NULL,
         "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -109,12 +114,25 @@ const initDb = async () => {
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "businessType" VARCHAR(255);
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "infoSource" VARCHAR(255);
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "isPinned" BOOLEAN DEFAULT FALSE;
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "createdById" INTEGER REFERENCES users(id) ON DELETE SET NULL;
 
       ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "userId" INTEGER REFERENCES users(id) ON DELETE SET NULL;
       ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "createdBy" VARCHAR(255);
 
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS "canViewAll" BOOLEAN DEFAULT TRUE;
       ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
       ALTER TABLE users ADD CONSTRAINT users_role_check CHECK(role IN ('super_admin', 'admin', 'staff'));
+
+      -- Migrate existing client createdById values from audit logs
+      UPDATE clients c
+      SET "createdById" = (
+        SELECT "userId" 
+        FROM client_logs l 
+        WHERE l."clientId" = c.id 
+          AND l."logText" LIKE '%Mendaftarkan client baru%'
+        LIMIT 1
+      )
+      WHERE c."createdById" IS NULL;
     `);
 
     // 3. Create indexes
