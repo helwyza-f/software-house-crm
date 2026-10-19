@@ -12,10 +12,12 @@ import {
   getSession,
   logout,
   togglePinClient,
+  changeClientStage,
   getGlobalHistory,
   ClientWithLogs
 } from './actions';
 import { Client } from '@/lib/db';
+import { STAGES, LOST_REASONS } from '@/lib/stages';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@/components/ui/card';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,7 +53,8 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
-  X
+  X,
+  Trophy
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -66,6 +69,7 @@ function DashboardContent() {
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [businessTypeFilter, setBusinessTypeFilter] = useState('ALL');
   const [infoSourceFilter, setInfoSourceFilter] = useState('ALL');
+  const [stageFilter, setStageFilter] = useState('ALL');
   const [date, setDate] = useState<DateRange | undefined>(undefined);
   const [showFilters, setShowFilters] = useState(false);
 
@@ -73,7 +77,8 @@ function DashboardContent() {
   const [facets, setFacets] = useState({
     categories: { High: 0, Medium: 0, Low: 0, ALL: 0 } as Record<string, number>,
     businessTypes: { ALL: 0 } as Record<string, number>,
-    infoSources: { ALL: 0 } as Record<string, number>
+    infoSources: { ALL: 0 } as Record<string, number>,
+    stages: { ALL: 0 } as Record<string, number>
   });
 
   // Global choices list
@@ -96,6 +101,12 @@ function DashboardContent() {
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [selectedClientData, setSelectedClientData] = useState<ClientWithLogs | null>(null);
   const [newLogText, setNewLogText] = useState('');
+
+  // Stage change dialog (for Closing / Batal which need extra details)
+  const [stageDialog, setStageDialog] = useState<{ client: Client; stage: 'Closing' | 'Batal' } | null>(null);
+  const [dealValueInput, setDealValueInput] = useState('');
+  const [lostReasonInput, setLostReasonInput] = useState('');
+  const [isSavingStage, setIsSavingStage] = useState(false);
 
   // Convert date state to string format for server action query parameters (YYYY-MM-DD)
   const startDateStr = date?.from ? format(date.from, 'yyyy-MM-dd') : '';
@@ -150,7 +161,8 @@ function DashboardContent() {
         startDateStr, 
         endDateStr, 
         page, 
-        itemsPerPage
+        itemsPerPage,
+        stageFilter
       );
       if (res.success && res.data) {
         setClients(res.data.clients);
@@ -184,7 +196,7 @@ function DashboardContent() {
 
   useEffect(() => {
     fetchClients();
-  }, [debouncedSearch, categoryFilter, businessTypeFilter, infoSourceFilter, startDateStr, endDateStr, page]);
+  }, [debouncedSearch, categoryFilter, businessTypeFilter, infoSourceFilter, stageFilter, startDateStr, endDateStr, page]);
 
   useEffect(() => {
     fetchCustomFields();
@@ -258,6 +270,73 @@ function DashboardContent() {
     }
   };
 
+  const getStageStyle = (stage: string) => {
+    switch (stage) {
+      case 'Closing':
+        return 'bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600';
+      case 'Batal':
+        return 'bg-slate-200 text-slate-500 border-slate-200 hover:bg-slate-300';
+      case 'Baru':
+        return 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50';
+      case 'Negosiasi':
+      case 'Penawaran':
+        return 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100';
+      default:
+        return 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100';
+    }
+  };
+
+  const formatRupiah = (value: unknown) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? `Rp ${n.toLocaleString('id-ID')}` : '';
+  };
+
+  const handleStageSelect = async (client: Client, newStage: string | null) => {
+    if (!newStage || newStage === client.stage) return;
+    if (newStage === 'Closing' || newStage === 'Batal') {
+      setDealValueInput('');
+      setLostReasonInput('');
+      setStageDialog({ client, stage: newStage });
+      return;
+    }
+    const res = await changeClientStage(client.id, newStage);
+    if (res.success) {
+      toast.success(`Stage diubah ke ${newStage}`);
+      fetchClients();
+    } else {
+      toast.error(res.error || 'Gagal mengubah stage');
+    }
+  };
+
+  const handleConfirmStage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stageDialog) return;
+    const { client, stage } = stageDialog;
+
+    let extra: { dealValue?: number | null; lostReason?: string | null } = {};
+    if (stage === 'Closing') {
+      const digits = dealValueInput.replace(/\D/g, '');
+      extra = { dealValue: digits ? parseInt(digits, 10) : null };
+    } else {
+      if (!lostReasonInput.trim()) {
+        toast.error('Alasan batal wajib diisi');
+        return;
+      }
+      extra = { lostReason: lostReasonInput.trim() };
+    }
+
+    setIsSavingStage(true);
+    const res = await changeClientStage(client.id, stage, extra);
+    setIsSavingStage(false);
+    if (res.success) {
+      toast.success(stage === 'Closing' ? 'Selamat, client closing! 🎉' : 'Client ditandai batal');
+      setStageDialog(null);
+      fetchClients();
+    } else {
+      toast.error(res.error || 'Gagal mengubah stage');
+    }
+  };
+
   const formatDate = (dateInput: any) => {
     try {
       if (!dateInput) return '';
@@ -281,7 +360,7 @@ function DashboardContent() {
     }
   };
 
-  const isFilterActive = categoryFilter !== 'ALL' || businessTypeFilter !== 'ALL' || infoSourceFilter !== 'ALL' || !!date;
+  const isFilterActive = categoryFilter !== 'ALL' || businessTypeFilter !== 'ALL' || infoSourceFilter !== 'ALL' || stageFilter !== 'ALL' || !!date;
   const isAtLeastAdmin = userSession?.role === 'admin' || userSession?.role === 'super_admin';
   const isSuperAdmin = userSession?.role === 'super_admin';
 
@@ -365,6 +444,7 @@ function DashboardContent() {
                 setCategoryFilter('ALL');
                 setBusinessTypeFilter('ALL');
                 setInfoSourceFilter('ALL');
+                setStageFilter('ALL');
                 setDate(undefined);
                 setSearch('');
                 setPage(1);
@@ -386,7 +466,7 @@ function DashboardContent() {
         {/* Collapsible Parallel Filter Panel */}
         {showFilters && (
           <Card className="border border-slate-100 shadow-inner rounded-2xl bg-slate-50/50 p-4 transition-all duration-200">
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
               {/* Potensi / Kategori */}
               <div className="space-y-1">
                 <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Potensi</Label>
@@ -399,6 +479,24 @@ function DashboardContent() {
                     <SelectItem value="High" className="text-sm">🔥 High Potential ({facets.categories.High})</SelectItem>
                     <SelectItem value="Medium" className="text-sm">⚡ Medium Potential ({facets.categories.Medium})</SelectItem>
                     <SelectItem value="Low" className="text-sm">❄️ Low Potential ({facets.categories.Low})</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Stage */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Stage</Label>
+                <Select value={stageFilter} onValueChange={(val) => { setStageFilter(val || 'ALL'); setPage(1); }}>
+                  <SelectTrigger className="w-full bg-white h-9.5 text-sm rounded-xl border-slate-200/80">
+                    <SelectValue placeholder="Semua Stage" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-sm">Semua Stage ({facets.stages.ALL})</SelectItem>
+                    {STAGES.map((stg) => (
+                      <SelectItem key={stg} value={stg} className="text-sm">
+                        {stg} ({facets.stages[stg] || 0})
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -513,6 +611,7 @@ function DashboardContent() {
                     setCategoryFilter('ALL');
                     setBusinessTypeFilter('ALL');
                     setInfoSourceFilter('ALL');
+                    setStageFilter('ALL');
                     setDate(undefined);
                     setPage(1);
                   }}
@@ -557,7 +656,9 @@ function DashboardContent() {
                 return (
                   <Card key={client.id} className={cn(
                     "border shadow-sm rounded-2xl bg-white hover:shadow-md transition-all flex flex-col justify-between",
-                    client.isPinned ? "border-amber-200/80 shadow-amber-50/50 bg-amber-50/5" : "border-slate-100"
+                    client.isPinned ? "border-amber-200/80 shadow-amber-50/50 bg-amber-50/5" : "border-slate-100",
+                    client.stage === 'Closing' && "border-emerald-300 bg-emerald-50/30",
+                    client.stage === 'Batal' && "opacity-60"
                   )}>
                     <div>
                       <CardHeader className="p-4 pb-2.5 flex flex-row items-start justify-between gap-4 space-y-0">
@@ -565,6 +666,30 @@ function DashboardContent() {
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-semibold text-slate-900 text-base">{client.name}</span>
                             {getCategoryBadge(client.category)}
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Select value={client.stage || 'Baru'} onValueChange={(val) => handleStageSelect(client, val)}>
+                              <SelectTrigger
+                                size="sm"
+                                className={cn('h-6 rounded-full px-2.5 py-0 text-xs font-medium gap-1', getStageStyle(client.stage || 'Baru'))}
+                                title="Ubah stage"
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {STAGES.map((stg) => (
+                                  <SelectItem key={stg} value={stg} className="text-sm">{stg}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {client.stage === 'Closing' && client.dealValue != null && (
+                              <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                                <Trophy className="h-3 w-3" /> {formatRupiah(client.dealValue)}
+                              </span>
+                            )}
+                            {client.stage === 'Batal' && client.lostReason && (
+                              <span className="text-xs text-slate-500 italic">{client.lostReason}</span>
+                            )}
                           </div>
                           <CardDescription className="flex items-center gap-1.5 text-sm text-slate-600 font-medium">
                             <Building2 className="h-3.5 w-3.5 text-slate-400" /> {client.businessName}
@@ -781,6 +906,66 @@ function DashboardContent() {
               </div>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Closing / Batal Dialog */}
+      <Dialog open={!!stageDialog} onOpenChange={(open) => !open && setStageDialog(null)}>
+        <DialogContent className="max-w-sm rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">
+              {stageDialog?.stage === 'Closing' ? 'Tandai Closing 🎉' : 'Tandai Batal'}
+            </DialogTitle>
+            <DialogDescription className="text-sm">
+              {stageDialog?.client.name} ({stageDialog?.client.businessName})
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleConfirmStage} className="space-y-4">
+            {stageDialog?.stage === 'Closing' ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="deal-value" className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Nilai Deal (Rp, opsional)</Label>
+                <Input
+                  id="deal-value"
+                  inputMode="numeric"
+                  placeholder="contoh: 15000000"
+                  value={dealValueInput ? Number(dealValueInput.replace(/\D/g, '') || 0).toLocaleString('id-ID') : ''}
+                  onChange={(e) => setDealValueInput(e.target.value.replace(/\D/g, ''))}
+                  className="rounded-xl border-slate-200"
+                />
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Alasan Batal</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {LOST_REASONS.filter((r) => r !== 'Lainnya').map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setLostReasonInput(r)}
+                      className={cn(
+                        'text-xs px-2.5 py-1 rounded-full border transition-colors',
+                        lostReasonInput === r ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      )}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                <Input
+                  placeholder="Atau tulis alasan lain..."
+                  value={lostReasonInput}
+                  onChange={(e) => setLostReasonInput(e.target.value)}
+                  className="rounded-xl border-slate-200"
+                />
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setStageDialog(null)}>Batal</Button>
+              <Button type="submit" size="sm" disabled={isSavingStage} className={stageDialog?.stage === 'Closing' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''}>
+                {isSavingStage ? 'Menyimpan...' : 'Simpan'}
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
 
