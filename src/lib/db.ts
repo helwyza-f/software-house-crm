@@ -12,6 +12,10 @@ export interface Client {
   infoSource?: string;
   customValues?: string;
   isPinned?: boolean;
+  stage: string;
+  dealValue?: number | null;
+  lostReason?: string | null;
+  closedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   createdById?: number | null;
@@ -115,6 +119,10 @@ const initDb = async () => {
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "infoSource" VARCHAR(255);
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "isPinned" BOOLEAN DEFAULT FALSE;
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "createdById" INTEGER REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS stage VARCHAR(50) NOT NULL DEFAULT 'Baru';
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "dealValue" NUMERIC(15,0);
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "lostReason" VARCHAR(255);
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "closedAt" TIMESTAMP;
 
       ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "userId" INTEGER REFERENCES users(id) ON DELETE SET NULL;
       ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "createdBy" VARCHAR(255);
@@ -138,9 +146,13 @@ const initDb = async () => {
     // 3. Create indexes
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_clients_category ON clients(category);
+      CREATE INDEX IF NOT EXISTS idx_clients_stage ON clients(stage);
       CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
       CREATE INDEX IF NOT EXISTS idx_clients_businessName ON clients("businessName");
       CREATE INDEX IF NOT EXISTS idx_client_logs_clientId ON client_logs("clientId");
+      CREATE INDEX IF NOT EXISTS idx_client_logs_createdAt ON client_logs("createdAt" DESC);
+      CREATE INDEX IF NOT EXISTS idx_clients_createdById ON clients("createdById");
+      CREATE INDEX IF NOT EXISTS idx_clients_order ON clients("isPinned" DESC, "updatedAt" DESC);
       CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
     `);
 

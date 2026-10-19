@@ -4,6 +4,7 @@ import { pool, Client, ClientLog, hashPassword, generateSalt } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
+import { STAGES, isStage } from '@/lib/stages';
 
 const SESSION_SECRET = process.env.SESSION_SECRET || 'crm-super-secret-key-32-chars-long!!';
 
@@ -198,7 +199,8 @@ export async function getClients(
   startDate = '',
   endDate = '',
   page = 1, 
-  limit = 12
+  limit = 12,
+  stage = ''
 ) {
   try {
     const session = await getSession();
@@ -214,7 +216,7 @@ export async function getClients(
     const userLimitId = (dbUser.role !== 'super_admin' && !dbUser.canViewAll) ? session.id : undefined;
 
     // Helper to build WHERE clause
-    const buildWhere = (s: string, cat: string, bus: string, info: string, sDate: string, eDate: string, limitId?: number) => {
+    const buildWhere = (s: string, cat: string, bus: string, info: string, sDate: string, eDate: string, limitId?: number, stg = '') => {
       let where = ' WHERE 1=1';
       const params: (string | number)[] = [];
       let pCount = 1;
@@ -244,6 +246,12 @@ export async function getClients(
         pCount += 1;
       }
 
+      if (stg && stg !== 'ALL') {
+        where += ` AND stage = $${pCount}`;
+        params.push(stg);
+        pCount += 1;
+      }
+
       if (sDate) {
         where += ` AND "createdAt"::date >= $${pCount}::date`;
         params.push(sDate);
@@ -265,17 +273,16 @@ export async function getClients(
       return { where, params, nextParamIndex: pCount };
     };
 
-    // 1. Get main client lists matching all active filters
-    const { where: mainWhere, params: mainParams, nextParamIndex } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId);
-    
-    // Get total count for pagination
-    const countRes = await pool.query(`SELECT COUNT(*) as count FROM clients${mainWhere}`, mainParams);
-    const total = parseInt(countRes.rows[0].count, 10);
+    // Build one WHERE per facet (each ignores its own filter) and run everything concurrently.
+    // Facet totals are derived from the grouped counts, so no separate COUNT(*) queries are needed.
+    const { where: mainWhere, params: mainParams, nextParamIndex } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId, stage);
+    const { where: catWhere, params: catParams } = buildWhere(search, 'ALL', businessType, infoSource, startDate, endDate, userLimitId, stage);
+    const { where: busWhere, params: busParams } = buildWhere(search, category, 'ALL', infoSource, startDate, endDate, userLimitId, stage);
+    const { where: infoWhere, params: infoParams } = buildWhere(search, category, businessType, 'ALL', startDate, endDate, userLimitId, stage);
+    const { where: stageWhere, params: stageParams } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId);
 
-    // Fetch paginated records
     const offset = (page - 1) * limit;
-    const paginatedParams = [...mainParams, limit, offset];
-    const query = `
+    const listQuery = `
       SELECT clients.*, u.username as "createdByUsername" 
       FROM clients 
       LEFT JOIN users u ON clients."createdById" = u.id 
@@ -283,38 +290,46 @@ export async function getClients(
       ORDER BY clients."isPinned" DESC, clients."updatedAt" DESC 
       LIMIT $${nextParamIndex} OFFSET $${nextParamIndex + 1}
     `;
-    
-    const res = await pool.query(query, paginatedParams);
-    const clients = res.rows as Client[];
 
-    // 2. Fetch facet counts for Categories (ignoring active category filter)
-    const { where: catWhere, params: catParams } = buildWhere(search, 'ALL', businessType, infoSource, startDate, endDate, userLimitId);
-    const catCountsRes = await pool.query(`SELECT category, COUNT(*) as count FROM clients${catWhere} GROUP BY category`, catParams);
-    const catTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${catWhere}`, catParams);
-    
-    const categoryCounts: Record<string, number> = { High: 0, Medium: 0, Low: 0, ALL: parseInt(catTotalRes.rows[0].count, 10) };
+    const [countRes, listRes, catCountsRes, busCountsRes, infoCountsRes, stageCountsRes] = await Promise.all([
+      pool.query(`SELECT COUNT(*) as count FROM clients${mainWhere}`, mainParams),
+      pool.query(listQuery, [...mainParams, limit, offset]),
+      pool.query(`SELECT category, COUNT(*) as count FROM clients${catWhere} GROUP BY category`, catParams),
+      pool.query(`SELECT "businessType", COUNT(*) as count FROM clients${busWhere} GROUP BY "businessType"`, busParams),
+      pool.query(`SELECT "infoSource", COUNT(*) as count FROM clients${infoWhere} GROUP BY "infoSource"`, infoParams),
+      pool.query(`SELECT stage, COUNT(*) as count FROM clients${stageWhere} GROUP BY stage`, stageParams),
+    ]);
+
+    const total = parseInt(countRes.rows[0].count, 10);
+    const clients = listRes.rows as Client[];
+
+    const categoryCounts: Record<string, number> = { High: 0, Medium: 0, Low: 0, ALL: 0 };
     catCountsRes.rows.forEach((row: { category: string; count: string }) => {
-      categoryCounts[row.category] = parseInt(row.count, 10);
+      const n = parseInt(row.count, 10);
+      categoryCounts[row.category] = n;
+      categoryCounts.ALL += n;
     });
 
-    // 3. Fetch facet counts for Business Types (ignoring active businessType filter)
-    const { where: busWhere, params: busParams } = buildWhere(search, category, 'ALL', infoSource, startDate, endDate, userLimitId);
-    const busCountsRes = await pool.query(`SELECT "businessType", COUNT(*) as count FROM clients${busWhere} GROUP BY "businessType"`, busParams);
-    const busTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${busWhere}`, busParams);
-    
-    const businessTypeCounts: Record<string, number> = { ALL: parseInt(busTotalRes.rows[0].count, 10) };
+    const businessTypeCounts: Record<string, number> = { ALL: 0 };
     busCountsRes.rows.forEach((row: { businessType: string; count: string }) => {
-      businessTypeCounts[row.businessType || 'Tidak Ada'] = parseInt(row.count, 10);
+      const n = parseInt(row.count, 10);
+      businessTypeCounts[row.businessType || 'Tidak Ada'] = (businessTypeCounts[row.businessType || 'Tidak Ada'] || 0) + n;
+      businessTypeCounts.ALL += n;
     });
 
-    // 4. Fetch facet counts for Info Sources (ignoring active infoSource filter)
-    const { where: infoWhere, params: infoParams } = buildWhere(search, category, businessType, 'ALL', startDate, endDate, userLimitId);
-    const infoCountsRes = await pool.query(`SELECT "infoSource", COUNT(*) as count FROM clients${infoWhere} GROUP BY "infoSource"`, infoParams);
-    const infoTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${infoWhere}`, infoParams);
-    
-    const infoSourceCounts: Record<string, number> = { ALL: parseInt(infoTotalRes.rows[0].count, 10) };
+    const infoSourceCounts: Record<string, number> = { ALL: 0 };
     infoCountsRes.rows.forEach((row: { infoSource: string; count: string }) => {
-      infoSourceCounts[row.infoSource || 'Tidak Ada'] = parseInt(row.count, 10);
+      const n = parseInt(row.count, 10);
+      infoSourceCounts[row.infoSource || 'Tidak Ada'] = (infoSourceCounts[row.infoSource || 'Tidak Ada'] || 0) + n;
+      infoSourceCounts.ALL += n;
+    });
+
+    const stageCounts: Record<string, number> = { ALL: 0 };
+    STAGES.forEach((s) => { stageCounts[s] = 0; });
+    stageCountsRes.rows.forEach((row: { stage: string; count: string }) => {
+      const n = parseInt(row.count, 10);
+      stageCounts[row.stage] = n;
+      stageCounts.ALL += n;
     });
 
     return { 
@@ -327,7 +342,8 @@ export async function getClients(
         facets: {
           categories: categoryCounts,
           businessTypes: businessTypeCounts,
-          infoSources: infoSourceCounts
+          infoSources: infoSourceCounts,
+          stages: stageCounts
         }
       }
     };
@@ -732,6 +748,103 @@ export async function togglePinClient(id: number) {
   } catch (error) {
     console.error('Error toggling pin:', error);
     return { success: false, error: 'Gagal mengubah status sematan client' };
+  }
+}
+
+export async function changeClientStage(
+  id: number,
+  stageInput: string,
+  extra?: { dealValue?: number | null; lostReason?: string | null }
+) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+    if (!isStage(stageInput)) {
+      return { success: false, error: 'Stage tidak valid' };
+    }
+    const newStage = stageInput;
+
+    // Re-check role/visibility against the database instead of trusting the cookie
+    const userRes = await pool.query('SELECT role, "canViewAll" FROM users WHERE id = $1', [session.id]);
+    if (userRes.rows.length === 0) {
+      return { success: false, error: 'User tidak ditemukan' };
+    }
+    const dbUser = userRes.rows[0];
+    const isolated = dbUser.role !== 'super_admin' && !dbUser.canViewAll;
+
+    const clientRes = await pool.query('SELECT stage, "createdById", "dealValue", "lostReason" FROM clients WHERE id = $1', [id]);
+    if (clientRes.rows.length === 0) {
+      return { success: false, error: 'Client tidak ditemukan' };
+    }
+    const old = clientRes.rows[0];
+
+    if (isolated && old.createdById !== session.id) {
+      return { success: false, error: 'Akses Ditolak: Anda hanya dapat mengubah stage client milik Anda sendiri' };
+    }
+
+    let dealValue: number | null = null;
+    let lostReason: string | null = null;
+    if (newStage === 'Closing') {
+      const v = extra?.dealValue;
+      if (v !== undefined && v !== null) {
+        if (!Number.isFinite(v) || v < 0) {
+          return { success: false, error: 'Nilai deal tidak valid' };
+        }
+        dealValue = Math.round(v);
+      }
+    } else if (newStage === 'Batal') {
+      const reason = extra?.lostReason?.trim();
+      if (!reason) {
+        return { success: false, error: 'Alasan batal wajib diisi' };
+      }
+      lostReason = reason.slice(0, 255);
+    }
+
+    const isTerminal = newStage === 'Closing' || newStage === 'Batal';
+    if (old.stage === newStage && !isTerminal) {
+      return { success: true };
+    }
+
+    const dbClient = await pool.connect();
+    try {
+      await dbClient.query('BEGIN');
+      await dbClient.query(
+        `UPDATE clients
+         SET stage = $1, "dealValue" = $2, "lostReason" = $3,
+             "closedAt" = CASE WHEN $4::boolean THEN CURRENT_TIMESTAMP ELSE NULL END,
+             "updatedAt" = CURRENT_TIMESTAMP
+         WHERE id = $5`,
+        [newStage, dealValue, lostReason, isTerminal, id]
+      );
+
+      const displayRole = dbUser.role === 'super_admin' ? 'Super Admin' : (dbUser.role === 'admin' ? 'Admin' : 'Staff');
+      const creatorName = `${session.username} (${displayRole})`;
+      let auditText = `Stage: "${old.stage}" ➔ "${newStage}"`;
+      if (newStage === 'Closing' && dealValue !== null) {
+        auditText += ` (Nilai deal: Rp ${dealValue.toLocaleString('id-ID')})`;
+      }
+      if (newStage === 'Batal' && lostReason) {
+        auditText += ` (Alasan: ${lostReason})`;
+      }
+      await dbClient.query(
+        'INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)',
+        [id, auditText, session.id, creatorName]
+      );
+      await dbClient.query('COMMIT');
+    } catch (err) {
+      await dbClient.query('ROLLBACK');
+      throw err;
+    } finally {
+      dbClient.release();
+    }
+
+    revalidatePath('/');
+    return { success: true };
+  } catch (error) {
+    console.error('Error changing client stage:', error);
+    return { success: false, error: 'Gagal mengubah stage client' };
   }
 }
 
