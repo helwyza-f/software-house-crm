@@ -273,17 +273,16 @@ export async function getClients(
       return { where, params, nextParamIndex: pCount };
     };
 
-    // 1. Get main client lists matching all active filters
+    // Build one WHERE per facet (each ignores its own filter) and run everything concurrently.
+    // Facet totals are derived from the grouped counts, so no separate COUNT(*) queries are needed.
     const { where: mainWhere, params: mainParams, nextParamIndex } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId, stage);
-    
-    // Get total count for pagination
-    const countRes = await pool.query(`SELECT COUNT(*) as count FROM clients${mainWhere}`, mainParams);
-    const total = parseInt(countRes.rows[0].count, 10);
+    const { where: catWhere, params: catParams } = buildWhere(search, 'ALL', businessType, infoSource, startDate, endDate, userLimitId, stage);
+    const { where: busWhere, params: busParams } = buildWhere(search, category, 'ALL', infoSource, startDate, endDate, userLimitId, stage);
+    const { where: infoWhere, params: infoParams } = buildWhere(search, category, businessType, 'ALL', startDate, endDate, userLimitId, stage);
+    const { where: stageWhere, params: stageParams } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId);
 
-    // Fetch paginated records
     const offset = (page - 1) * limit;
-    const paginatedParams = [...mainParams, limit, offset];
-    const query = `
+    const listQuery = `
       SELECT clients.*, u.username as "createdByUsername" 
       FROM clients 
       LEFT JOIN users u ON clients."createdById" = u.id 
@@ -291,49 +290,46 @@ export async function getClients(
       ORDER BY clients."isPinned" DESC, clients."updatedAt" DESC 
       LIMIT $${nextParamIndex} OFFSET $${nextParamIndex + 1}
     `;
-    
-    const res = await pool.query(query, paginatedParams);
-    const clients = res.rows as Client[];
 
-    // 2. Fetch facet counts for Categories (ignoring active category filter)
-    const { where: catWhere, params: catParams } = buildWhere(search, 'ALL', businessType, infoSource, startDate, endDate, userLimitId, stage);
-    const catCountsRes = await pool.query(`SELECT category, COUNT(*) as count FROM clients${catWhere} GROUP BY category`, catParams);
-    const catTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${catWhere}`, catParams);
-    
-    const categoryCounts: Record<string, number> = { High: 0, Medium: 0, Low: 0, ALL: parseInt(catTotalRes.rows[0].count, 10) };
+    const [countRes, listRes, catCountsRes, busCountsRes, infoCountsRes, stageCountsRes] = await Promise.all([
+      pool.query(`SELECT COUNT(*) as count FROM clients${mainWhere}`, mainParams),
+      pool.query(listQuery, [...mainParams, limit, offset]),
+      pool.query(`SELECT category, COUNT(*) as count FROM clients${catWhere} GROUP BY category`, catParams),
+      pool.query(`SELECT "businessType", COUNT(*) as count FROM clients${busWhere} GROUP BY "businessType"`, busParams),
+      pool.query(`SELECT "infoSource", COUNT(*) as count FROM clients${infoWhere} GROUP BY "infoSource"`, infoParams),
+      pool.query(`SELECT stage, COUNT(*) as count FROM clients${stageWhere} GROUP BY stage`, stageParams),
+    ]);
+
+    const total = parseInt(countRes.rows[0].count, 10);
+    const clients = listRes.rows as Client[];
+
+    const categoryCounts: Record<string, number> = { High: 0, Medium: 0, Low: 0, ALL: 0 };
     catCountsRes.rows.forEach((row: { category: string; count: string }) => {
-      categoryCounts[row.category] = parseInt(row.count, 10);
+      const n = parseInt(row.count, 10);
+      categoryCounts[row.category] = n;
+      categoryCounts.ALL += n;
     });
 
-    // 3. Fetch facet counts for Business Types (ignoring active businessType filter)
-    const { where: busWhere, params: busParams } = buildWhere(search, category, 'ALL', infoSource, startDate, endDate, userLimitId, stage);
-    const busCountsRes = await pool.query(`SELECT "businessType", COUNT(*) as count FROM clients${busWhere} GROUP BY "businessType"`, busParams);
-    const busTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${busWhere}`, busParams);
-    
-    const businessTypeCounts: Record<string, number> = { ALL: parseInt(busTotalRes.rows[0].count, 10) };
+    const businessTypeCounts: Record<string, number> = { ALL: 0 };
     busCountsRes.rows.forEach((row: { businessType: string; count: string }) => {
-      businessTypeCounts[row.businessType || 'Tidak Ada'] = parseInt(row.count, 10);
+      const n = parseInt(row.count, 10);
+      businessTypeCounts[row.businessType || 'Tidak Ada'] = (businessTypeCounts[row.businessType || 'Tidak Ada'] || 0) + n;
+      businessTypeCounts.ALL += n;
     });
 
-    // 4. Fetch facet counts for Info Sources (ignoring active infoSource filter)
-    const { where: infoWhere, params: infoParams } = buildWhere(search, category, businessType, 'ALL', startDate, endDate, userLimitId, stage);
-    const infoCountsRes = await pool.query(`SELECT "infoSource", COUNT(*) as count FROM clients${infoWhere} GROUP BY "infoSource"`, infoParams);
-    const infoTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${infoWhere}`, infoParams);
-    
-    const infoSourceCounts: Record<string, number> = { ALL: parseInt(infoTotalRes.rows[0].count, 10) };
+    const infoSourceCounts: Record<string, number> = { ALL: 0 };
     infoCountsRes.rows.forEach((row: { infoSource: string; count: string }) => {
-      infoSourceCounts[row.infoSource || 'Tidak Ada'] = parseInt(row.count, 10);
+      const n = parseInt(row.count, 10);
+      infoSourceCounts[row.infoSource || 'Tidak Ada'] = (infoSourceCounts[row.infoSource || 'Tidak Ada'] || 0) + n;
+      infoSourceCounts.ALL += n;
     });
 
-    // 5. Fetch facet counts for Stages (ignoring active stage filter)
-    const { where: stageWhere, params: stageParams } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId);
-    const stageCountsRes = await pool.query(`SELECT stage, COUNT(*) as count FROM clients${stageWhere} GROUP BY stage`, stageParams);
-    const stageTotalRes = await pool.query(`SELECT COUNT(*) as count FROM clients${stageWhere}`, stageParams);
-
-    const stageCounts: Record<string, number> = { ALL: parseInt(stageTotalRes.rows[0].count, 10) };
+    const stageCounts: Record<string, number> = { ALL: 0 };
     STAGES.forEach((s) => { stageCounts[s] = 0; });
     stageCountsRes.rows.forEach((row: { stage: string; count: string }) => {
-      stageCounts[row.stage] = parseInt(row.count, 10);
+      const n = parseInt(row.count, 10);
+      stageCounts[row.stage] = n;
+      stageCounts.ALL += n;
     });
 
     return { 

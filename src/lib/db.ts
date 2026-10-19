@@ -150,6 +150,9 @@ const initDb = async () => {
       CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
       CREATE INDEX IF NOT EXISTS idx_clients_businessName ON clients("businessName");
       CREATE INDEX IF NOT EXISTS idx_client_logs_clientId ON client_logs("clientId");
+      CREATE INDEX IF NOT EXISTS idx_client_logs_createdAt ON client_logs("createdAt" DESC);
+      CREATE INDEX IF NOT EXISTS idx_clients_createdById ON clients("createdById");
+      CREATE INDEX IF NOT EXISTS idx_clients_order ON clients("isPinned" DESC, "updatedAt" DESC);
       CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
     `);
 

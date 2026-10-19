@@ -7,13 +7,11 @@ import {
   getClientWithLogs, 
   deleteClient, 
   addClientLog,
-  getCustomFields,
   getGlobalOptions,
   getSession,
   logout,
   togglePinClient,
   changeClientStage,
-  getGlobalHistory,
   ClientWithLogs
 } from './actions';
 import { Client } from '@/lib/db';
@@ -62,6 +60,7 @@ function DashboardContent() {
   const [userSession, setUserSession] = useState<{ id: number; username: string; role: 'super_admin' | 'admin' | 'staff' } | null>(null);
   
   const [clients, setClients] = useState<Client[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   
@@ -90,13 +89,9 @@ function DashboardContent() {
   const [totalClients, setTotalClients] = useState(0);
   const itemsPerPage = 12;
 
-  // Custom global variables/fields list
-  const [customFields, setCustomFields] = useState<string[]>([]);
-
   // Modals state
   const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [deleteClientId, setDeleteClientId] = useState<number | null>(null);
-  const [globalHistory, setGlobalHistory] = useState<any[]>([]);
   
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [selectedClientData, setSelectedClientData] = useState<ClientWithLogs | null>(null);
@@ -143,16 +138,11 @@ function DashboardContent() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const fetchGlobalHistoryData = async () => {
-    const res = await getGlobalHistory(10);
-    if (res.success && res.data) {
-      setGlobalHistory(res.data);
-    }
-  };
-
   // Fetch clients function
   const fetchClients = () => {
     startTransition(async () => {
+      setIsLoading(true);
+      try {
       const res = await getClients(
         debouncedSearch, 
         categoryFilter, 
@@ -171,19 +161,15 @@ function DashboardContent() {
         if (res.data.facets) {
           setFacets(res.data.facets);
         }
-        fetchGlobalHistoryData();
       } else {
         toast.error(res.error || 'Gagal memuat data client');
       }
+      } catch {
+        toast.error('Gagal memuat data client. Coba muat ulang halaman.');
+      } finally {
+        setIsLoading(false);
+      }
     });
-  };
-
-  // Fetch custom fields list
-  const fetchCustomFields = async () => {
-    const res = await getCustomFields();
-    if (res.success && res.data) {
-      setCustomFields(res.data);
-    }
   };
 
   // Fetch dropdown options list
@@ -199,7 +185,6 @@ function DashboardContent() {
   }, [debouncedSearch, categoryFilter, businessTypeFilter, infoSourceFilter, stageFilter, startDateStr, endDateStr, page]);
 
   useEffect(() => {
-    fetchCustomFields();
     fetchDropdownOptions();
   }, []);
 
@@ -245,7 +230,6 @@ function DashboardContent() {
         setSelectedClientData(updated.data);
       }
       fetchClients();
-      fetchGlobalHistoryData();
     } else {
       toast.error(res.error || 'Gagal menambahkan log');
     }
@@ -627,7 +611,18 @@ function DashboardContent() {
 
       {/* Clients List */}
       <main className="flex-grow flex flex-col gap-6">
-        {clients.length === 0 ? (
+        {isLoading && clients.length === 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-busy="true">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-44 rounded-2xl border border-slate-100 bg-white p-4 space-y-3 animate-pulse">
+                <div className="h-4 w-2/3 rounded bg-slate-100" />
+                <div className="h-3 w-1/2 rounded bg-slate-100" />
+                <div className="h-3 w-1/3 rounded bg-slate-100" />
+                <div className="h-3 w-3/4 rounded bg-slate-100" />
+              </div>
+            ))}
+          </div>
+        ) : clients.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 px-4 border border-dashed border-slate-200 rounded-2xl bg-white text-center gap-3 max-w-md mx-auto w-full">
             <User className="h-10 w-10 text-slate-300" />
             <div className="space-y-1">
@@ -645,7 +640,7 @@ function DashboardContent() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className={cn("grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 transition-opacity", isLoading && "opacity-60")}>
               {clients.map((client) => {
                 let customValuesObj: Record<string, string> = {};
                 try {
