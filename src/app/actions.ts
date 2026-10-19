@@ -730,18 +730,7 @@ export async function togglePinClient(id: number) {
     
     const currentlyPinned = !!clientRes.rows[0].isPinned;
 
-    if (!currentlyPinned) {
-      // Check maximum pin limit
-      const countRes = await pool.query('SELECT COUNT(*) as count FROM clients WHERE "isPinned" = TRUE');
-      const pinnedCount = parseInt(countRes.rows[0].count, 10);
-      if (pinnedCount >= 3) {
-        return { success: false, error: 'Maksimal 3 client yang dapat dipin di baris teratas' };
-      }
-
-      await pool.query('UPDATE clients SET "isPinned" = TRUE, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1', [id]);
-    } else {
-      await pool.query('UPDATE clients SET "isPinned" = FALSE, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1', [id]);
-    }
+    await pool.query('UPDATE clients SET "isPinned" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $2', [!currentlyPinned, id]);
 
     revalidatePath('/');
     return { success: true };
@@ -813,7 +802,7 @@ export async function changeClientStage(
       await dbClient.query(
         `UPDATE clients
          SET stage = $1, "dealValue" = $2, "lostReason" = $3,
-             "closedAt" = CASE WHEN $4::boolean THEN CURRENT_TIMESTAMP ELSE NULL END,
+             "closedAt" = CASE WHEN $4::boolean THEN COALESCE(CASE WHEN stage = $1 THEN "closedAt" END, CURRENT_TIMESTAMP) ELSE NULL END,
              "updatedAt" = CURRENT_TIMESTAMP
          WHERE id = $5`,
         [newStage, dealValue, lostReason, isTerminal, id]
@@ -821,7 +810,9 @@ export async function changeClientStage(
 
       const displayRole = dbUser.role === 'super_admin' ? 'Super Admin' : (dbUser.role === 'admin' ? 'Admin' : 'Staff');
       const creatorName = `${session.username} (${displayRole})`;
-      let auditText = `Stage: "${old.stage}" ➔ "${newStage}"`;
+      let auditText = old.stage === newStage
+        ? `Memperbarui detail ${newStage}`
+        : `Stage: "${old.stage}" ➔ "${newStage}"`;
       if (newStage === 'Closing' && dealValue !== null) {
         auditText += ` (Nilai deal: Rp ${dealValue.toLocaleString('id-ID')})`;
       }
