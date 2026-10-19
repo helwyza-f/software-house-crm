@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
-import { getClientWithLogs, updateClient, getCustomFields, getGlobalOptions } from '../../actions';
+import { getClientWithLogs, updateClient, changeClientStage, getCustomFields, getGlobalOptions } from '../../actions';
+import { STAGES, LOST_REASONS } from '@/lib/stages';
+import { cn } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,6 +38,9 @@ export default function EditClientPage({ params }: EditProps) {
     infoSource: '',
     customValues: {} as Record<string, string>
   });
+
+  const [stageData, setStageData] = useState({ stage: 'Baru', dealValue: '', lostReason: '' });
+  const [originalStage, setOriginalStage] = useState({ stage: 'Baru', dealValue: '', lostReason: '' });
 
   useEffect(() => {
     async function loadData() {
@@ -72,6 +77,13 @@ export default function EditClientPage({ params }: EditProps) {
           infoSource: client.infoSource || '',
           customValues: parsedCustom
         });
+        const loadedStage = {
+          stage: client.stage || 'Baru',
+          dealValue: client.dealValue != null ? String(Math.round(Number(client.dealValue))) : '',
+          lostReason: client.lostReason || ''
+        };
+        setStageData(loadedStage);
+        setOriginalStage(loadedStage);
       } else {
         toast.error(clientRes.error || 'Client tidak ditemukan');
         router.push('/');
@@ -91,6 +103,11 @@ export default function EditClientPage({ params }: EditProps) {
       return;
     }
 
+    if (stageData.stage === 'Batal' && !stageData.lostReason.trim()) {
+      toast.error('Alasan batal wajib diisi');
+      return;
+    }
+
     setLoading(true);
     const res = await updateClient(clientId, {
       name: formData.name,
@@ -102,6 +119,25 @@ export default function EditClientPage({ params }: EditProps) {
       infoSource: formData.infoSource,
       customValues: JSON.stringify(formData.customValues)
     });
+
+    if (res.success) {
+      const stageChanged =
+        stageData.stage !== originalStage.stage ||
+        (stageData.stage === 'Closing' && stageData.dealValue !== originalStage.dealValue) ||
+        (stageData.stage === 'Batal' && stageData.lostReason.trim() !== originalStage.lostReason);
+
+      if (stageChanged) {
+        const stageRes = await changeClientStage(clientId, stageData.stage, {
+          dealValue: stageData.dealValue ? parseInt(stageData.dealValue, 10) : null,
+          lostReason: stageData.lostReason
+        });
+        if (!stageRes.success) {
+          setLoading(false);
+          toast.error(stageRes.error || 'Data tersimpan, tetapi stage gagal diubah');
+          return;
+        }
+      }
+    }
 
     setLoading(false);
     if (res.success) {
@@ -234,6 +270,66 @@ export default function EditClientPage({ params }: EditProps) {
                   <SelectItem value="Low" className="text-sm">❄️ Low Potential</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50/50 p-4">
+              <div className="space-y-2">
+                <Label htmlFor="stage" className="text-sm font-semibold text-slate-700">Stage</Label>
+                <Select
+                  value={stageData.stage}
+                  onValueChange={(val) => { if (val) setStageData({ ...stageData, stage: val }); }}
+                >
+                  <SelectTrigger id="stage" className="text-base h-11 bg-white border-slate-200/80 rounded-xl">
+                    <SelectValue placeholder="Pilih Stage" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STAGES.map((stg) => (
+                      <SelectItem key={stg} value={stg} className="text-sm">{stg}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {stageData.stage === 'Closing' && (
+                <div className="space-y-2">
+                  <Label htmlFor="dealValue" className="text-sm font-semibold text-slate-700">Nilai Deal (Rp, opsional)</Label>
+                  <Input
+                    id="dealValue"
+                    inputMode="numeric"
+                    placeholder="contoh: 15.000.000"
+                    value={stageData.dealValue ? Number(stageData.dealValue).toLocaleString('id-ID') : ''}
+                    onChange={(e) => setStageData({ ...stageData, dealValue: e.target.value.replace(/\D/g, '') })}
+                    className="text-base h-11 bg-white border-slate-200/80 rounded-xl focus-visible:ring-1"
+                  />
+                </div>
+              )}
+
+              {stageData.stage === 'Batal' && (
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold text-slate-700">Alasan Batal *</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {LOST_REASONS.filter((r) => r !== 'Lainnya').map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setStageData({ ...stageData, lostReason: r })}
+                        className={cn(
+                          'text-xs px-2.5 py-1 rounded-full border transition-colors',
+                          stageData.lostReason === r ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                        )}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                  <Input
+                    placeholder="Atau tulis alasan lain..."
+                    value={stageData.lostReason}
+                    onChange={(e) => setStageData({ ...stageData, lostReason: e.target.value })}
+                    className="text-base h-11 bg-white border-slate-200/80 rounded-xl focus-visible:ring-1"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Dynamic Custom Fields */}

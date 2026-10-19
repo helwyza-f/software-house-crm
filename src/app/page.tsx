@@ -11,11 +11,10 @@ import {
   getSession,
   logout,
   togglePinClient,
-  changeClientStage,
   ClientWithLogs
 } from './actions';
 import { Client } from '@/lib/db';
-import { STAGES, LOST_REASONS } from '@/lib/stages';
+import { STAGES } from '@/lib/stages';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@/components/ui/card';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -96,12 +95,6 @@ function DashboardContent() {
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [selectedClientData, setSelectedClientData] = useState<ClientWithLogs | null>(null);
   const [newLogText, setNewLogText] = useState('');
-
-  // Stage change dialog (for Closing / Batal which need extra details)
-  const [stageDialog, setStageDialog] = useState<{ client: Client; stage: 'Closing' | 'Batal' } | null>(null);
-  const [dealValueInput, setDealValueInput] = useState('');
-  const [lostReasonInput, setLostReasonInput] = useState('');
-  const [isSavingStage, setIsSavingStage] = useState(false);
 
   // Convert date state to string format for server action query parameters (YYYY-MM-DD)
   const startDateStr = date?.from ? format(date.from, 'yyyy-MM-dd') : '';
@@ -273,52 +266,6 @@ function DashboardContent() {
   const formatRupiah = (value: unknown) => {
     const n = Number(value);
     return Number.isFinite(n) ? `Rp ${n.toLocaleString('id-ID')}` : '';
-  };
-
-  const handleStageSelect = async (client: Client, newStage: string | null) => {
-    if (!newStage || newStage === client.stage) return;
-    if (newStage === 'Closing' || newStage === 'Batal') {
-      setDealValueInput('');
-      setLostReasonInput('');
-      setStageDialog({ client, stage: newStage });
-      return;
-    }
-    const res = await changeClientStage(client.id, newStage);
-    if (res.success) {
-      toast.success(`Stage diubah ke ${newStage}`);
-      fetchClients();
-    } else {
-      toast.error(res.error || 'Gagal mengubah stage');
-    }
-  };
-
-  const handleConfirmStage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!stageDialog) return;
-    const { client, stage } = stageDialog;
-
-    let extra: { dealValue?: number | null; lostReason?: string | null } = {};
-    if (stage === 'Closing') {
-      const digits = dealValueInput.replace(/\D/g, '');
-      extra = { dealValue: digits ? parseInt(digits, 10) : null };
-    } else {
-      if (!lostReasonInput.trim()) {
-        toast.error('Alasan batal wajib diisi');
-        return;
-      }
-      extra = { lostReason: lostReasonInput.trim() };
-    }
-
-    setIsSavingStage(true);
-    const res = await changeClientStage(client.id, stage, extra);
-    setIsSavingStage(false);
-    if (res.success) {
-      toast.success(stage === 'Closing' ? 'Selamat, client closing! 🎉' : 'Client ditandai batal');
-      setStageDialog(null);
-      fetchClients();
-    } else {
-      toast.error(res.error || 'Gagal mengubah stage');
-    }
   };
 
   const formatDate = (dateInput: any) => {
@@ -641,15 +588,32 @@ function DashboardContent() {
         ) : (
           <>
             <div className={cn("grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 transition-opacity", isLoading && "opacity-60")}>
-              {clients.map((client) => {
+              {clients.map((client, index) => {
                 let customValuesObj: Record<string, string> = {};
                 try {
                   customValuesObj = JSON.parse(client.customValues || '{}');
                 } catch {}
                 const filledCustoms = Object.entries(customValuesObj).filter(([_, val]) => val.trim());
 
+                const hasPinned = clients[0]?.isPinned;
+                const showPinnedHeader = index === 0 && client.isPinned;
+                const showOthersHeader = hasPinned && !client.isPinned && clients[index - 1]?.isPinned;
+
                 return (
-                  <Card key={client.id} className={cn(
+                  <React.Fragment key={client.id}>
+                  {showPinnedHeader && (
+                    <div className="col-span-full flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200/70 px-3 py-2 text-amber-700">
+                      <Pin className="h-4 w-4 fill-amber-500 text-amber-500" />
+                      <span className="text-sm font-semibold">Disematkan</span>
+                      <span className="text-xs text-amber-600/80">Client prioritas yang Anda sematkan</span>
+                    </div>
+                  )}
+                  {showOthersHeader && (
+                    <div className="col-span-full flex items-center gap-2 border-b border-slate-200 px-1 pb-1.5 pt-3 text-slate-500">
+                      <span className="text-sm font-semibold">Client Lainnya</span>
+                    </div>
+                  )}
+                  <Card className={cn(
                     "border shadow-sm rounded-2xl bg-white hover:shadow-md transition-all flex flex-col justify-between",
                     client.isPinned ? "border-amber-200/80 shadow-amber-50/50 bg-amber-50/5" : "border-slate-100",
                     client.stage === 'Closing' && "border-emerald-300 bg-emerald-50/30",
@@ -663,20 +627,12 @@ function DashboardContent() {
                             {getCategoryBadge(client.category)}
                           </div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <Select value={client.stage || 'Baru'} onValueChange={(val) => handleStageSelect(client, val)}>
-                              <SelectTrigger
-                                size="sm"
-                                className={cn('h-6 rounded-full px-2.5 py-0 text-xs font-medium gap-1', getStageStyle(client.stage || 'Baru'))}
-                                title="Ubah stage"
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {STAGES.map((stg) => (
-                                  <SelectItem key={stg} value={stg} className="text-sm">{stg}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <Badge
+                              variant="outline"
+                              className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', getStageStyle(client.stage || 'Baru'))}
+                            >
+                              {client.stage || 'Baru'}
+                            </Badge>
                             {client.stage === 'Closing' && client.dealValue != null && (
                               <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
                                 <Trophy className="h-3 w-3" /> {formatRupiah(client.dealValue)}
@@ -760,7 +716,7 @@ function DashboardContent() {
                           onClick={async () => {
                             const res = await togglePinClient(client.id);
                             if (res.success) {
-                              toast.success(client.isPinned ? 'Sematan berhasil dilepas' : 'Client berhasil disematkan ke baris teratas');
+                              toast.success(client.isPinned ? 'Sematan berhasil dilepas' : 'Client berhasil disematkan');
                               fetchClients();
                             } else {
                               toast.error(res.error || 'Gagal menyematkan client');
@@ -805,6 +761,7 @@ function DashboardContent() {
                       </div>
                     </CardFooter>
                   </Card>
+                  </React.Fragment>
                 );
               })}
             </div>
@@ -901,66 +858,6 @@ function DashboardContent() {
               </div>
             )}
           </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Closing / Batal Dialog */}
-      <Dialog open={!!stageDialog} onOpenChange={(open) => !open && setStageDialog(null)}>
-        <DialogContent className="max-w-sm rounded-2xl p-6">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold">
-              {stageDialog?.stage === 'Closing' ? 'Tandai Closing 🎉' : 'Tandai Batal'}
-            </DialogTitle>
-            <DialogDescription className="text-sm">
-              {stageDialog?.client.name} ({stageDialog?.client.businessName})
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleConfirmStage} className="space-y-4">
-            {stageDialog?.stage === 'Closing' ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="deal-value" className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Nilai Deal (Rp, opsional)</Label>
-                <Input
-                  id="deal-value"
-                  inputMode="numeric"
-                  placeholder="contoh: 15000000"
-                  value={dealValueInput ? Number(dealValueInput.replace(/\D/g, '') || 0).toLocaleString('id-ID') : ''}
-                  onChange={(e) => setDealValueInput(e.target.value.replace(/\D/g, ''))}
-                  className="rounded-xl border-slate-200"
-                />
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Alasan Batal</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {LOST_REASONS.filter((r) => r !== 'Lainnya').map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setLostReasonInput(r)}
-                      className={cn(
-                        'text-xs px-2.5 py-1 rounded-full border transition-colors',
-                        lostReasonInput === r ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                      )}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
-                <Input
-                  placeholder="Atau tulis alasan lain..."
-                  value={lostReasonInput}
-                  onChange={(e) => setLostReasonInput(e.target.value)}
-                  className="rounded-xl border-slate-200"
-                />
-              </div>
-            )}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={() => setStageDialog(null)}>Batal</Button>
-              <Button type="submit" size="sm" disabled={isSavingStage} className={stageDialog?.stage === 'Closing' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''}>
-                {isSavingStage ? 'Menyimpan...' : 'Simpan'}
-              </Button>
-            </div>
-          </form>
         </DialogContent>
       </Dialog>
 
