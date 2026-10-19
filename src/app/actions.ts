@@ -761,6 +761,9 @@ export async function changeClientStage(
       return { success: false, error: 'User tidak ditemukan' };
     }
     const dbUser = userRes.rows[0];
+    if (dbUser.role !== 'admin' && dbUser.role !== 'super_admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin atau Super Admin yang dapat mengubah stage client' };
+    }
     const isolated = dbUser.role !== 'super_admin' && !dbUser.canViewAll;
 
     const clientRes = await pool.query('SELECT stage, "createdById", "dealValue", "lostReason" FROM clients WHERE id = $1', [id]);
