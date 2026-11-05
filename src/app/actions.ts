@@ -842,6 +842,117 @@ export async function changeClientStage(
   }
 }
 
+export async function markResponded(id: number) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+
+    const userRes = await pool.query('SELECT role, "canViewAll" FROM users WHERE id = $1', [session.id]);
+    if (userRes.rows.length === 0) {
+      return { success: false, error: 'User tidak ditemukan' };
+    }
+    const dbUser = userRes.rows[0];
+    const isolated = dbUser.role !== 'super_admin' && !dbUser.canViewAll;
+
+    const clientRes = await pool.query('SELECT "respondedAt", "createdById" FROM clients WHERE id = $1', [id]);
+    if (clientRes.rows.length === 0) {
+      return { success: false, error: 'Client tidak ditemukan' };
+    }
+    if (isolated && clientRes.rows[0].createdById !== session.id) {
+      return { success: false, error: 'Akses Ditolak: Anda hanya dapat menandai client milik Anda sendiri' };
+    }
+
+    const wasResponded = clientRes.rows[0].respondedAt != null;
+    const displayRole = dbUser.role === 'super_admin' ? 'Super Admin' : (dbUser.role === 'admin' ? 'Admin' : 'Staff');
+    const creatorName = `${session.username} (${displayRole})`;
+
+    const dbClient = await pool.connect();
+    try {
+      await dbClient.query('BEGIN');
+      await dbClient.query(
+        `UPDATE clients SET "respondedAt" = ${wasResponded ? 'NULL' : 'CURRENT_TIMESTAMP'}, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1`,
+        [id]
+      );
+      await dbClient.query(
+        'INSERT INTO client_logs ("clientId", "logText", "userId", "createdBy", "createdAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)',
+        [id, wasResponded ? 'Membatalkan penanda lead merespon.' : 'Menandai lead telah merespon.', session.id, creatorName]
+      );
+      await dbClient.query('COMMIT');
+    } catch (err) {
+      await dbClient.query('ROLLBACK');
+      throw err;
+    } finally {
+      dbClient.release();
+    }
+
+    revalidatePath('/');
+    revalidatePath('/clients');
+    return { success: true, data: { responded: !wasResponded } };
+  } catch (error) {
+    console.error('Error marking responded:', error);
+    return { success: false, error: 'Gagal menandai lead merespon' };
+  }
+}
+
+export async function getDashboardStats(today: string) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+
+    const userRes = await pool.query('SELECT role, "canViewAll" FROM users WHERE id = $1', [session.id]);
+    if (userRes.rows.length === 0) {
+      return { success: false, error: 'User tidak ditemukan' };
+    }
+    const dbUser = userRes.rows[0];
+    const isolated = dbUser.role !== 'super_admin' && !dbUser.canViewAll;
+
+    // Scope every metric to the user's own clients when they cannot view all.
+    const ownFilter = isolated ? ' AND "createdById" = $2' : '';
+    const ownParam = isolated ? [session.id] : [];
+
+    const [newLeadsRes, respondedRes, potentialRes, followedUpRes] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*) as count FROM clients WHERE "createdAt"::date = $1::date${ownFilter}`,
+        [today, ...ownParam]
+      ),
+      pool.query(
+        `SELECT COUNT(*) as count FROM clients WHERE "respondedAt"::date = $1::date${ownFilter}`,
+        [today, ...ownParam]
+      ),
+      pool.query(
+        `SELECT COUNT(*) as count FROM clients WHERE category = 'High'${ownFilter ? ' AND "createdById" = $1' : ''}`,
+        isolated ? [session.id] : []
+      ),
+      pool.query(
+        `SELECT COUNT(DISTINCT l."clientId") as count
+         FROM client_logs l
+         JOIN clients c ON c.id = l."clientId"
+         WHERE l."createdAt"::date = $1::date
+           AND l."logText" NOT LIKE '%Mendaftarkan client baru%'
+           ${isolated ? ' AND c."createdById" = $2' : ''}`,
+        [today, ...ownParam]
+      ),
+    ]);
+
+    return {
+      success: true,
+      data: {
+        newLeadsToday: parseInt(newLeadsRes.rows[0].count, 10),
+        followedUpToday: parseInt(followedUpRes.rows[0].count, 10),
+        respondedToday: parseInt(respondedRes.rows[0].count, 10),
+        potentialHigh: parseInt(potentialRes.rows[0].count, 10),
+      }
+    };
+  } catch (error) {
+    console.error('Error fetching dashboard stats:', error);
+    return { success: false, error: 'Gagal mengambil ringkasan dashboard' };
+  }
+}
+
 export async function getGlobalHistory(limit = 10) {
   try {
     const session = await getSession();

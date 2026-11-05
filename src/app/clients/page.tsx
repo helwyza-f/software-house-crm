@@ -1,0 +1,1128 @@
+'use client';
+
+import React, { useState, useEffect, startTransition, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { 
+  getClients, 
+  getClientWithLogs, 
+  deleteClient, 
+  addClientLog,
+  getGlobalOptions,
+  getSession,
+  logout,
+  togglePinClient,
+  markResponded,
+  ClientWithLogs
+} from '../actions';
+import { Client } from '@/lib/db';
+import { STAGES } from '@/lib/stages';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@/components/ui/card';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
+import { DateRange } from 'react-day-picker';
+import { 
+  Search, 
+  Plus, 
+  Phone, 
+  Building2, 
+  MapPin, 
+  History, 
+  Edit3, 
+  Trash2, 
+  User, 
+  Users,
+  Pin,
+  MessageSquarePlus, 
+  Filter, 
+  Calendar,
+  CalendarRange,
+  Settings,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  X,
+  Trophy,
+  LayoutGrid,
+  List,
+  Pencil,
+  CheckCheck,
+  LayoutDashboard
+} from 'lucide-react';
+import Link from 'next/link';
+
+function DashboardContent() {
+  const [userSession, setUserSession] = useState<{ id: number; username: string; role: 'super_admin' | 'admin' | 'staff' } | null>(null);
+  
+  const [clients, setClients] = useState<Client[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  
+  // Parallel filters state
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [businessTypeFilter, setBusinessTypeFilter] = useState('ALL');
+  const [infoSourceFilter, setInfoSourceFilter] = useState('ALL');
+  const [stageFilter, setStageFilter] = useState('ALL');
+  const [date, setDate] = useState<DateRange | undefined>(undefined);
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Facet counts state
+  const [facets, setFacets] = useState({
+    categories: { High: 0, Medium: 0, Low: 0, ALL: 0 } as Record<string, number>,
+    businessTypes: { ALL: 0 } as Record<string, number>,
+    infoSources: { ALL: 0 } as Record<string, number>,
+    stages: { ALL: 0 } as Record<string, number>
+  });
+
+  // Global choices list
+  const [globalOptions, setGlobalOptions] = useState<{ businessTypes: string[], infoSources: string[] }>({ businessTypes: [], infoSources: [] });
+  
+  // Pagination states
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalClients, setTotalClients] = useState(0);
+  const itemsPerPage = 12;
+
+  // Modals state
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [deleteClientId, setDeleteClientId] = useState<number | null>(null);
+  
+  const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
+  const [selectedClientData, setSelectedClientData] = useState<ClientWithLogs | null>(null);
+  const [newLogText, setNewLogText] = useState('');
+
+  // Convert date state to string format for server action query parameters (YYYY-MM-DD)
+  const startDateStr = date?.from ? format(date.from, 'yyyy-MM-dd') : '';
+  const endDateStr = date?.to ? format(date.to, 'yyyy-MM-dd') : '';
+
+  // Load user session
+  useEffect(() => {
+    async function loadSession() {
+      const session = await getSession();
+      setUserSession(session);
+    }
+    loadSession();
+  }, []);
+
+  // Restore saved view preference (table is the default)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('clientViewMode');
+      if (saved === 'grid' || saved === 'table') {
+        setViewMode(saved);
+      }
+    } catch {}
+  }, []);
+
+  const changeViewMode = (mode: 'table' | 'grid') => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem('clientViewMode', mode);
+    } catch {}
+  };
+
+  const searchParamsHook = useSearchParams();
+
+  // Auto-open logs if openLogs query parameter is present
+  useEffect(() => {
+    const openLogsId = searchParamsHook.get('openLogs');
+    if (openLogsId) {
+      const clientId = parseInt(openLogsId, 10);
+      if (!isNaN(clientId)) {
+        viewLogs(clientId);
+      }
+    }
+  }, [searchParamsHook]);
+
+  // Search Debounce Effect
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1); // Reset to page 1 on new search
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Fetch clients function
+  const fetchClients = () => {
+    startTransition(async () => {
+      setIsLoading(true);
+      try {
+      const res = await getClients(
+        debouncedSearch, 
+        categoryFilter, 
+        businessTypeFilter, 
+        infoSourceFilter, 
+        startDateStr, 
+        endDateStr, 
+        page, 
+        itemsPerPage,
+        stageFilter
+      );
+      if (res.success && res.data) {
+        setClients(res.data.clients);
+        setTotalPages(res.data.pages);
+        setTotalClients(res.data.total);
+        if (res.data.facets) {
+          setFacets(res.data.facets);
+        }
+      } else {
+        toast.error(res.error || 'Gagal memuat data client');
+      }
+      } catch {
+        toast.error('Gagal memuat data client. Coba muat ulang halaman.');
+      } finally {
+        setIsLoading(false);
+      }
+    });
+  };
+
+  // Fetch dropdown options list
+  const fetchDropdownOptions = async () => {
+    const res = await getGlobalOptions();
+    if (res.success && res.data) {
+      setGlobalOptions(res.data);
+    }
+  };
+
+  useEffect(() => {
+    fetchClients();
+  }, [debouncedSearch, categoryFilter, businessTypeFilter, infoSourceFilter, stageFilter, startDateStr, endDateStr, page]);
+
+  useEffect(() => {
+    fetchDropdownOptions();
+  }, []);
+
+  // Load client logs
+  async function viewLogs(clientId: number) {
+    setSelectedClientId(clientId);
+    const res = await getClientWithLogs(clientId);
+    if (res.success && res.data) {
+      setSelectedClientData(res.data);
+      setIsLogsOpen(true);
+    } else {
+      toast.error(res.error || 'Gagal memuat log client');
+    }
+  }
+
+  // Delete client handler
+  const handleDelete = async (id: number) => {
+    const res = await deleteClient(id);
+    if (res.success) {
+      toast.success('Client berhasil dihapus');
+      fetchClients();
+      if (isLogsOpen && selectedClientId === id) {
+        setIsLogsOpen(false);
+      }
+    } else {
+      toast.error(res.error || 'Gagal menghapus client');
+    }
+    setDeleteClientId(null);
+  };
+
+  // Add new log entry handler
+  const handleAddLog = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedClientId || !newLogText.trim()) return;
+
+    const res = await addClientLog(selectedClientId, newLogText);
+    if (res.success) {
+      toast.success('Log aktivitas berhasil ditambahkan');
+      setNewLogText('');
+      // Reload logs dialog content
+      const updated = await getClientWithLogs(selectedClientId);
+      if (updated.success && updated.data) {
+        setSelectedClientData(updated.data);
+      }
+      fetchClients();
+    } else {
+      toast.error(res.error || 'Gagal menambahkan log');
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    toast.success('Berhasil keluar');
+    window.location.href = '/login';
+  };
+
+  const handleMarkResponded = async (client: Client) => {
+    const res = await markResponded(client.id);
+    if (res.success) {
+      toast.success(res.data?.responded ? 'Lead ditandai telah merespon' : 'Penanda merespon dibatalkan');
+      fetchClients();
+    } else {
+      toast.error(res.error || 'Gagal menandai lead merespon');
+    }
+  };
+
+  const getCategoryBadge = (category: string) => {
+    switch (category) {
+      case 'High':
+        return <Badge className="bg-rose-500 hover:bg-rose-600 text-white font-medium px-2 py-0.5">High Potential</Badge>;
+      case 'Medium':
+        return <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-medium px-2 py-0.5">Medium Potential</Badge>;
+      case 'Low':
+        return <Badge className="bg-sky-500 hover:bg-sky-600 text-white font-medium px-2 py-0.5">Low Potential</Badge>;
+      default:
+        return <Badge variant="secondary">{category}</Badge>;
+    }
+  };
+
+  const getStageStyle = (stage: string) => {
+    switch (stage) {
+      case 'Closing':
+        return 'bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600';
+      case 'Batal':
+        return 'bg-slate-200 text-slate-500 border-slate-200 hover:bg-slate-300';
+      case 'Baru':
+        return 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50';
+      case 'Negosiasi':
+      case 'Penawaran':
+        return 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100';
+      default:
+        return 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100';
+    }
+  };
+
+  const formatRupiah = (value: unknown) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? `Rp ${n.toLocaleString('id-ID')}` : '';
+  };
+
+  const formatDate = (dateInput: any) => {
+    try {
+      if (!dateInput) return '';
+      let dateStr = dateInput instanceof Date ? dateInput.toISOString() : String(dateInput);
+      
+      // Ensure UTC representation is parsed as UTC by appending 'Z' if missing timezone offset
+      if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-')) {
+        dateStr = dateStr.replace(' ', 'T') + 'Z';
+      }
+      
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch {
+      return '';
+    }
+  };
+
+  const isFilterActive = categoryFilter !== 'ALL' || businessTypeFilter !== 'ALL' || infoSourceFilter !== 'ALL' || stageFilter !== 'ALL' || !!date;
+  const isAtLeastAdmin = userSession?.role === 'admin' || userSession?.role === 'super_admin';
+  const isSuperAdmin = userSession?.role === 'super_admin';
+
+  return (
+    <div className="max-w-6xl mx-auto w-full px-4 py-6 md:py-10 flex-grow flex flex-col gap-6">
+      
+      {/* Header */}
+      <header className="flex flex-col gap-2 pb-2 border-b border-slate-100">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">LeadManager</h1>
+            <p className="text-sm text-slate-500">
+              Kelola data calon client Software House dengan mudah.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            {/* User Session status */}
+            <div className="flex items-center gap-2 text-xs bg-slate-100 border border-slate-200/50 p-1 px-3 rounded-full text-slate-600 font-medium">
+              <User className="h-3.5 w-3.5 text-slate-400" />
+              <span>{userSession?.username} ({userSession?.role === 'super_admin' ? 'Super Admin' : (userSession?.role === 'admin' ? 'Admin' : 'Staff')})</span>
+              <span className="text-slate-300">|</span>
+              <button onClick={handleLogout} className="hover:text-rose-600 font-bold flex items-center gap-1 select-none">
+                <LogOut className="h-3 w-3" /> Keluar
+              </button>
+            </div>
+            
+            {isSuperAdmin && (
+              <Link 
+                href="/users" 
+                title="Manajemen Akun Pengguna"
+                className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
+              >
+                <Users className="h-4.5 w-4.5" />
+              </Link>
+            )}
+            
+            {isAtLeastAdmin && (
+              <Link 
+                href="/settings" 
+                title="Konfigurasi Variabel"
+                className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
+              >
+                <Settings className="h-4.5 w-4.5" />
+              </Link>
+            )}
+
+            <Link
+              href="/"
+              title="Dashboard"
+              className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
+            >
+              <LayoutDashboard className="h-4.5 w-4.5" />
+            </Link>
+
+            <Link
+              href="/history"
+              title="Riwayat Aktivitas Global"
+              className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
+            >
+              <History className="h-4.5 w-4.5" />
+            </Link>
+            
+            <Link 
+              href="/add"
+              className={buttonVariants({ variant: 'default', size: 'sm', className: 'rounded-full shadow-sm text-sm' })}
+            >
+              <Plus className="h-4 w-4 mr-1" /> Client Baru
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      {/* Filter and Search Bar */}
+      <section className="flex flex-col gap-3">
+        <div className="flex gap-2">
+          <div className="relative flex-grow">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+            <Input 
+              placeholder="Cari nama, usaha, no hp, alamat..." 
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 bg-white border-slate-200/80 rounded-xl focus-visible:ring-1 text-sm shadow-sm"
+            />
+          </div>
+          {isFilterActive && (
+            <Button 
+              variant="ghost" 
+              onClick={() => {
+                setCategoryFilter('ALL');
+                setBusinessTypeFilter('ALL');
+                setInfoSourceFilter('ALL');
+                setStageFilter('ALL');
+                setDate(undefined);
+                setSearch('');
+                setPage(1);
+              }}
+              className="rounded-xl hover:bg-rose-50 text-rose-600 border border-transparent hover:border-rose-100 text-sm px-4"
+            >
+              Reset
+            </Button>
+          )}
+          <Button 
+            variant="outline" 
+            onClick={() => setShowFilters(!showFilters)}
+            className={`rounded-xl border-slate-200/80 text-sm flex gap-1.5 items-center px-4 ${showFilters ? 'bg-slate-100 border-slate-300' : 'bg-white'}`}
+          >
+            <Filter className="h-4 w-4" /> Filter {isFilterActive && '•'}
+          </Button>
+
+          {/* View toggle: table (default) / grid */}
+          <div className="flex items-center rounded-xl border border-slate-200/80 bg-white p-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => changeViewMode('table')}
+              aria-pressed={viewMode === 'table'}
+              title="Tampilan Tabel"
+              className={cn(
+                'flex items-center gap-1.5 rounded-lg px-2.5 h-8 text-sm font-medium transition-colors',
+                viewMode === 'table' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
+              )}
+            >
+              <List className="h-4 w-4" />
+              <span className="hidden sm:inline">Tabel</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => changeViewMode('grid')}
+              aria-pressed={viewMode === 'grid'}
+              title="Tampilan Grid"
+              className={cn(
+                'flex items-center gap-1.5 rounded-lg px-2.5 h-8 text-sm font-medium transition-colors',
+                viewMode === 'grid' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
+              )}
+            >
+              <LayoutGrid className="h-4 w-4" />
+              <span className="hidden sm:inline">Grid</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Collapsible Parallel Filter Panel */}
+        {showFilters && (
+          <Card className="border border-slate-100 shadow-inner rounded-2xl bg-slate-50/50 p-4 transition-all duration-200">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              {/* Potensi / Kategori */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Potensi</Label>
+                <Select value={categoryFilter} onValueChange={(val) => { setCategoryFilter(val || 'ALL'); setPage(1); }}>
+                  <SelectTrigger className="w-full bg-white h-9.5 text-sm rounded-xl border-slate-200/80">
+                    <SelectValue placeholder="Semua Kategori" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-sm">Semua Kategori ({facets.categories.ALL})</SelectItem>
+                    <SelectItem value="High" className="text-sm">🔥 High Potential ({facets.categories.High})</SelectItem>
+                    <SelectItem value="Medium" className="text-sm">⚡ Medium Potential ({facets.categories.Medium})</SelectItem>
+                    <SelectItem value="Low" className="text-sm">❄️ Low Potential ({facets.categories.Low})</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Stage */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Stage</Label>
+                <Select value={stageFilter} onValueChange={(val) => { setStageFilter(val || 'ALL'); setPage(1); }}>
+                  <SelectTrigger className="w-full bg-white h-9.5 text-sm rounded-xl border-slate-200/80">
+                    <SelectValue placeholder="Semua Stage" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-sm">Semua Stage ({facets.stages.ALL})</SelectItem>
+                    {STAGES.map((stg) => (
+                      <SelectItem key={stg} value={stg} className="text-sm">
+                        {stg} ({facets.stages[stg] || 0})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Jenis Usaha */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Jenis Usaha</Label>
+                <Select value={businessTypeFilter} onValueChange={(val) => { setBusinessTypeFilter(val || 'ALL'); setPage(1); }}>
+                  <SelectTrigger className="w-full bg-white h-9.5 text-sm rounded-xl border-slate-200/80">
+                    <SelectValue placeholder="Semua Jenis Usaha" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-sm">Semua Jenis Usaha ({facets.businessTypes.ALL})</SelectItem>
+                    {globalOptions.businessTypes.map((type) => {
+                      const count = facets.businessTypes[type] || 0;
+                      return (
+                        <SelectItem key={type} value={type} className="text-sm">
+                          💼 {type} ({count})
+                        </SelectItem>
+                      );
+                    })}
+                    {facets.businessTypes['Tidak Ada'] !== undefined && facets.businessTypes['Tidak Ada'] > 0 && (
+                      <SelectItem value="Tidak Ada" className="text-sm">
+                        ❌ Belum diisi ({facets.businessTypes['Tidak Ada']})
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Sumber Informasi */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Sumber Informasi</Label>
+                <Select value={infoSourceFilter} onValueChange={(val) => { setInfoSourceFilter(val || 'ALL'); setPage(1); }}>
+                  <SelectTrigger className="w-full bg-white h-9.5 text-sm rounded-xl border-slate-200/80">
+                    <SelectValue placeholder="Semua Sumber" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-sm">Semua Sumber ({facets.infoSources.ALL})</SelectItem>
+                    {globalOptions.infoSources.map((source) => {
+                      const count = facets.infoSources[source] || 0;
+                      return (
+                        <SelectItem key={source} value={source} className="text-sm">
+                          📢 {source} ({count})
+                        </SelectItem>
+                      );
+                    })}
+                    {facets.infoSources['Tidak Ada'] !== undefined && facets.infoSources['Tidak Ada'] > 0 && (
+                      <SelectItem value="Tidak Ada" className="text-sm">
+                        ❌ Belum diisi ({facets.infoSources['Tidak Ada']})
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Filter Tanggal */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Tanggal Masuk</Label>
+                <div className="flex gap-1.5">
+                  <Popover>
+                    <PopoverTrigger
+                      className={cn(
+                        buttonVariants({ variant: "outline" }),
+                        "w-full bg-white h-9.5 text-xs rounded-xl border-slate-200/80 justify-start text-left font-normal px-3",
+                        !date && "text-slate-500"
+                      )}
+                    >
+                      <CalendarRange className="mr-2 h-4 w-4 text-slate-400 shrink-0" />
+                      <span className="truncate">
+                        {date?.from ? (
+                          date.to ? (
+                            <>
+                              {format(date.from, "dd MMM yyyy")} - {format(date.to, "dd MMM yyyy")}
+                            </>
+                          ) : (
+                            format(date.from, "dd MMM yyyy")
+                          )
+                        ) : (
+                          "Pilih Rentang Tanggal"
+                        )}
+                      </span>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 border border-slate-100 shadow-xl rounded-2xl bg-white" align="start">
+                      <CalendarComponent
+                        mode="range"
+                        selected={date}
+                        onSelect={(val) => { setDate(val); setPage(1); }}
+                        className="p-3"
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  {date && (
+                    <Button 
+                      variant="ghost" 
+                      onClick={() => { setDate(undefined); setPage(1); }}
+                      className="h-9.5 w-9.5 p-0 hover:bg-rose-50 text-slate-400 hover:text-rose-500 rounded-xl border border-slate-200/40"
+                      title="Reset Tanggal"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+            </div>
+            {isFilterActive && (
+              <div className="flex justify-end pt-3 mt-3 border-t border-slate-200/40">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCategoryFilter('ALL');
+                    setBusinessTypeFilter('ALL');
+                    setInfoSourceFilter('ALL');
+                    setStageFilter('ALL');
+                    setDate(undefined);
+                    setPage(1);
+                  }}
+                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold cursor-pointer select-none"
+                >
+                  Reset Semua Filter
+                </button>
+              </div>
+            )}
+          </Card>
+        )}
+      </section>
+
+      {/* Clients List */}
+      <main className="flex-grow flex flex-col gap-6">
+        {isLoading && clients.length === 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-busy="true">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-44 rounded-2xl border border-slate-100 bg-white p-4 space-y-3 animate-pulse">
+                <div className="h-4 w-2/3 rounded bg-slate-100" />
+                <div className="h-3 w-1/2 rounded bg-slate-100" />
+                <div className="h-3 w-1/3 rounded bg-slate-100" />
+                <div className="h-3 w-3/4 rounded bg-slate-100" />
+              </div>
+            ))}
+          </div>
+        ) : clients.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 px-4 border border-dashed border-slate-200 rounded-2xl bg-white text-center gap-3 max-w-md mx-auto w-full">
+            <User className="h-10 w-10 text-slate-300" />
+            <div className="space-y-1">
+              <h3 className="font-semibold text-slate-900 text-sm">Belum ada client</h3>
+              <p className="text-xs text-slate-500">
+                Tidak ada data client potensial ditemukan. Silakan tambahkan data baru atau sesuaikan filter Anda.
+              </p>
+            </div>
+            <Link 
+              href="/add"
+              className={buttonVariants({ variant: 'default', size: 'sm', className: 'rounded-xl text-sm' })}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" /> Tambah Client
+            </Link>
+          </div>
+        ) : (
+          <>
+            {viewMode === 'grid' ? (
+            <div className={cn("grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 transition-opacity", isLoading && "opacity-60")}>
+              {clients.map((client, index) => {
+                let customValuesObj: Record<string, string> = {};
+                try {
+                  customValuesObj = JSON.parse(client.customValues || '{}');
+                } catch {}
+                const filledCustoms = Object.entries(customValuesObj).filter(([_, val]) => val.trim());
+
+                const hasPinned = clients[0]?.isPinned;
+                const showPinnedHeader = index === 0 && client.isPinned;
+                const showOthersHeader = hasPinned && !client.isPinned && clients[index - 1]?.isPinned;
+
+                return (
+                  <React.Fragment key={client.id}>
+                  {showPinnedHeader && (
+                    <div className="col-span-full flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200/70 px-3 py-2 text-amber-700">
+                      <Pin className="h-4 w-4 fill-amber-500 text-amber-500" />
+                      <span className="text-sm font-semibold">Disematkan</span>
+                      <span className="text-xs text-amber-600/80">Client prioritas yang Anda sematkan</span>
+                    </div>
+                  )}
+                  {showOthersHeader && (
+                    <div className="col-span-full flex items-center gap-2 border-b border-slate-200 px-1 pb-1.5 pt-3 text-slate-500">
+                      <span className="text-sm font-semibold">Client Lainnya</span>
+                    </div>
+                  )}
+                  <Card className={cn(
+                    "border shadow-sm rounded-2xl bg-white hover:shadow-md transition-all flex flex-col justify-between",
+                    client.isPinned ? "border-amber-200/80 shadow-amber-50/50 bg-amber-50/5" : "border-slate-100",
+                    client.stage === 'Closing' && "border-emerald-300 bg-emerald-50/30",
+                    client.stage === 'Batal' && "opacity-60"
+                  )}>
+                    <div>
+                      <CardHeader className="p-4 pb-2.5 flex flex-row items-start justify-between gap-4 space-y-0">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-slate-900 text-base">{client.name}</span>
+                            {getCategoryBadge(client.category)}
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge
+                              variant="outline"
+                              className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', getStageStyle(client.stage || 'Baru'))}
+                            >
+                              {client.stage || 'Baru'}
+                            </Badge>
+                            {client.stage === 'Closing' && client.dealValue != null && (
+                              <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                                <Trophy className="h-3 w-3" /> {formatRupiah(client.dealValue)}
+                              </span>
+                            )}
+                            {client.stage === 'Batal' && client.lostReason && (
+                              <span className="text-xs text-slate-500 italic">{client.lostReason}</span>
+                            )}
+                          </div>
+                          <CardDescription className="flex items-center gap-1.5 text-sm text-slate-600 font-medium">
+                            <Building2 className="h-3.5 w-3.5 text-slate-400" /> {client.businessName}
+                          </CardDescription>
+                        </div>
+                      </CardHeader>
+                      
+                      <CardContent className="px-4 py-0 pb-3 text-sm space-y-2 text-slate-500">
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-3.5 w-3.5 text-slate-400" />
+                          <a href={`tel:${client.phone}`} className="hover:underline text-slate-600 font-mono">
+                            {client.phone}
+                          </a>
+                        </div>
+                        {client.address && (
+                          <div className="flex items-start gap-2">
+                            <MapPin className="h-3.5 w-3.5 text-slate-400 mt-0.5" />
+                            <span className="leading-relaxed">{client.address}</span>
+                          </div>
+                        )}
+
+                        {/* Display dropdown selections */}
+                        {(client.businessType || client.infoSource) && (
+                          <div className="flex items-center gap-1.5 flex-wrap pt-1 mr-4">
+                            {client.businessType && (
+                              <Badge variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-md font-sans">
+                                💼 {client.businessType}
+                              </Badge>
+                            )}
+                            {client.infoSource && (
+                              <Badge variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-md font-sans">
+                                📢 {client.infoSource}
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Display Custom Fields */}
+                        {filledCustoms.length > 0 && (
+                          <div className="pt-2 border-t border-slate-100/80 mt-2 flex flex-col gap-1">
+                            {filledCustoms.map(([label, val]) => (
+                              <div key={label} className="flex justify-between items-center text-xs bg-slate-50 border border-slate-100/50 p-1.5 px-2 rounded-lg">
+                                <span className="font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
+                                <span className="text-slate-700 font-medium">{val}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </div>
+                    
+                    <CardFooter className="px-4 py-3 bg-slate-50/50 rounded-b-2xl border-t border-slate-100/50 flex items-center justify-between">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs text-slate-400 flex items-center gap-1">
+                          <Calendar className="h-3 w-3" /> Update: {formatDate(client.updatedAt)}
+                        </span>
+                        {isSuperAdmin && (
+                          <span className="text-[9px] text-slate-400/80 italic font-mono pl-4">
+                            Dibuat oleh: {client.createdByUsername || 'System'}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className={cn(
+                            "h-8 w-8 rounded-lg transition-colors",
+                            client.isPinned 
+                              ? "text-amber-500 hover:text-amber-600 bg-amber-50 hover:bg-amber-100" 
+                              : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                          )}
+                          onClick={async () => {
+                            const res = await togglePinClient(client.id);
+                            if (res.success) {
+                              toast.success(client.isPinned ? 'Sematan berhasil dilepas' : 'Client berhasil disematkan');
+                              fetchClients();
+                            } else {
+                              toast.error(res.error || 'Gagal menyematkan client');
+                            }
+                          }}
+                          title={client.isPinned ? "Lepas Pin" : "Sematkan Teratas"}
+                        >
+                          <Pin className={cn("h-4 w-4", client.isPinned && "fill-amber-500")} />
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn(
+                            "h-8 w-8 rounded-lg transition-colors",
+                            client.respondedAt
+                              ? "text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                              : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                          )}
+                          onClick={() => handleMarkResponded(client)}
+                          title={client.respondedAt ? "Lead sudah merespon (klik untuk batalkan)" : "Tandai lead telah merespon"}
+                        >
+                          <CheckCheck className="h-4 w-4" />
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                          onClick={() => viewLogs(client.id)}
+                          title="Log & Keterangan"
+                        >
+                          <History className="h-4 w-4" />
+                        </Button>
+                        
+                        {/* Only Admin or Super Admin can Edit or Delete clients */}
+                        {isAtLeastAdmin && (
+                          <>
+                            <Link 
+                              href={`/edit/${client.id}`}
+                              className={buttonVariants({ variant: 'ghost', size: 'icon', className: 'h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg' })}
+                              title="Edit Data"
+                            >
+                              <Edit3 className="h-4 w-4" />
+                            </Link>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
+                              onClick={() => setDeleteClientId(client.id)}
+                              title="Hapus"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </CardFooter>
+                  </Card>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+            ) : (
+            <div className={cn("overflow-x-auto rounded-2xl border border-slate-100 bg-white shadow-sm transition-opacity", isLoading && "opacity-60")}>
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    <th className="px-4 py-3">Client</th>
+                    <th className="px-4 py-3">Potensi</th>
+                    <th className="px-4 py-3">Stage</th>
+                    <th className="px-4 py-3 hidden md:table-cell">No HP</th>
+                    <th className="px-4 py-3 hidden lg:table-cell">Update</th>
+                    <th className="px-4 py-3 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clients.map((client) => (
+                    <tr
+                      key={client.id}
+                      className={cn(
+                        "border-b border-slate-100 last:border-0 hover:bg-slate-50/60 transition-colors align-top",
+                        client.isPinned && "bg-amber-50/40",
+                        client.stage === 'Closing' && "bg-emerald-50/30",
+                        client.stage === 'Batal' && "opacity-60"
+                      )}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-start gap-1.5">
+                          {client.isPinned && <Pin className="h-3.5 w-3.5 mt-0.5 fill-amber-500 text-amber-500 shrink-0" />}
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-900">{client.name}</div>
+                            <div className="flex items-center gap-1 text-xs text-slate-500">
+                              <Building2 className="h-3 w-3 text-slate-400 shrink-0" />
+                              <span className="truncate">{client.businessName}</span>
+                            </div>
+                            {isSuperAdmin && (
+                              <div className="text-[9px] text-slate-400/80 italic font-mono mt-0.5">
+                                Dibuat: {client.createdByUsername || 'System'}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">{getCategoryBadge(client.category)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-0.5">
+                          <Badge
+                            variant="outline"
+                            className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium w-fit', getStageStyle(client.stage || 'Baru'))}
+                          >
+                            {client.stage || 'Baru'}
+                          </Badge>
+                          {client.stage === 'Closing' && client.dealValue != null && (
+                            <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                              <Trophy className="h-3 w-3" /> {formatRupiah(client.dealValue)}
+                            </span>
+                          )}
+                          {client.stage === 'Batal' && client.lostReason && (
+                            <span className="text-xs text-slate-500 italic">{client.lostReason}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 hidden md:table-cell">
+                        <a href={`tel:${client.phone}`} className="hover:underline text-slate-600 font-mono text-xs">
+                          {client.phone}
+                        </a>
+                      </td>
+                      <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-400 whitespace-nowrap">
+                        {formatDate(client.updatedAt)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                              "h-8 w-8 rounded-lg transition-colors",
+                              client.isPinned
+                                ? "text-amber-500 hover:text-amber-600 bg-amber-50 hover:bg-amber-100"
+                                : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                            )}
+                            onClick={async () => {
+                              const res = await togglePinClient(client.id);
+                              if (res.success) {
+                                toast.success(client.isPinned ? 'Sematan berhasil dilepas' : 'Client berhasil disematkan');
+                                fetchClients();
+                              } else {
+                                toast.error(res.error || 'Gagal menyematkan client');
+                              }
+                            }}
+                            title={client.isPinned ? "Lepas Pin" : "Sematkan Teratas"}
+                          >
+                            <Pin className={cn("h-4 w-4", client.isPinned && "fill-amber-500")} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                              "h-8 w-8 rounded-lg transition-colors",
+                              client.respondedAt
+                                ? "text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                                : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                            )}
+                            onClick={() => handleMarkResponded(client)}
+                            title={client.respondedAt ? "Lead sudah merespon (klik untuk batalkan)" : "Tandai lead telah merespon"}
+                          >
+                            <CheckCheck className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                            onClick={() => viewLogs(client.id)}
+                            title="Log & Keterangan"
+                          >
+                            <History className="h-4 w-4" />
+                          </Button>
+                          {isAtLeastAdmin && (
+                            <>
+                              <Link
+                                href={`/edit/${client.id}`}
+                                className={buttonVariants({ variant: 'ghost', size: 'icon', className: 'h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg' })}
+                                title="Edit Data"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Link>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
+                                onClick={() => setDeleteClientId(client.id)}
+                                title="Hapus"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            )}
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-slate-150 pt-4 pb-2 mt-2 text-xs text-slate-500">
+                <span>
+                  Menampilkan <strong>{Math.min((page - 1) * itemsPerPage + 1, totalClients)}</strong> sampai <strong>{Math.min(page * itemsPerPage, totalClients)}</strong> dari <strong>{totalClients}</strong> client
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg text-xs"
+                    onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                    disabled={page === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-0.5" /> Prev
+                  </Button>
+                  <span className="font-medium text-slate-700 px-1">
+                    Hal {page} / {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg text-xs"
+                    onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                    disabled={page === totalPages}
+                  >
+                    Next <ChevronRight className="h-4 w-4 ml-0.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </main>
+
+      {/* Footer Branding */}
+      <footer className="text-center py-4">
+        <p className="text-[10px] text-slate-400 font-mono">LeadManager v1.5 • PostgreSQL DB</p>
+      </footer>
+
+      {/* Client Interaction Logs Dialog */}
+      <Dialog open={isLogsOpen} onOpenChange={setIsLogsOpen}>
+        <DialogContent className="max-w-md rounded-2xl p-6 max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Log Aktivitas & Keterangan</DialogTitle>
+            <DialogDescription className="text-sm">
+              {selectedClientData?.name} ({selectedClientData?.businessName})
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Add New Log Form */}
+          <form onSubmit={handleAddLog} className="space-y-2 py-2 shrink-0">
+            <Label htmlFor="new-log" className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tambah Log Aktivitas Baru</Label>
+            <div className="flex gap-2">
+              <Textarea 
+                id="new-log"
+                placeholder="Tulis log aktivitas baru di sini..." 
+                value={newLogText}
+                onChange={(e) => setNewLogText(e.target.value)}
+                className="text-sm resize-none h-11 py-2 rounded-xl border-slate-200"
+              />
+              <Button type="submit" size="sm" className="h-11 px-3 shrink-0 rounded-xl">
+                <MessageSquarePlus className="h-4.5 w-4.5" />
+              </Button>
+            </div>
+          </form>
+
+          {/* Timeline List */}
+          <div className="flex-grow overflow-y-auto py-2 space-y-4 pr-1 scrollbar-thin">
+            {selectedClientData?.logs && selectedClientData.logs.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-6">Belum ada log/keterangan yang tercatat.</p>
+            ) : (
+              <div className="relative border-l border-slate-150 pl-3 ml-2 space-y-4 py-1 text-xs">
+                {selectedClientData?.logs.map((log) => (
+                  <div key={log.id} className="relative">
+                    {/* Timeline dot */}
+                    <div className="absolute -left-[17px] top-1 h-2.5 w-2.5 rounded-full bg-slate-400 border-2 border-white" />
+                    
+                    <div className="flex justify-between items-center text-[10px] text-slate-400 font-medium mb-0.5">
+                      <span>{formatDate(log.createdAt)}</span>
+                      {log.createdBy && (
+                        <span className="font-semibold text-slate-500 italic">Oleh: {log.createdBy}</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100/60 font-sans">
+                      {log.logText}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Shadcn AlertDialog for Delete Confirmation */}
+      <AlertDialog open={!!deleteClientId} onOpenChange={(open) => !open && setDeleteClientId(null)}>
+        <AlertDialogContent className="max-w-sm rounded-2xl p-6">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lg">Konfirmasi Hapus</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm">
+              Apakah Anda yakin ingin menghapus data client ini secara permanen? Seluruh riwayat log aktivitas client ini juga akan ikut terhapus dan tidak dapat dikembalikan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-row items-center gap-2 justify-end mt-2">
+            <AlertDialogCancel className="text-xs m-0" size="sm">Batal</AlertDialogCancel>
+            <AlertDialogAction 
+              variant="destructive" 
+              size="sm" 
+              className="text-xs bg-rose-600 hover:bg-rose-700 text-white" 
+              onClick={() => deleteClientId && handleDelete(deleteClientId)}
+            >
+              Hapus Permanen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+    </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <Suspense fallback={<div className="max-w-6xl mx-auto p-4 text-slate-500 animate-pulse text-sm font-medium">Memuat Dasbor...</div>}>
+      <DashboardContent />
+    </Suspense>
+  );
+}
