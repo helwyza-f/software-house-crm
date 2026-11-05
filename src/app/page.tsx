@@ -51,7 +51,10 @@ import {
   ChevronRight,
   LogOut,
   X,
-  Trophy
+  Trophy,
+  LayoutGrid,
+  List,
+  Pencil
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -60,6 +63,7 @@ function DashboardContent() {
   
   const [clients, setClients] = useState<Client[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   
@@ -108,6 +112,23 @@ function DashboardContent() {
     }
     loadSession();
   }, []);
+
+  // Restore saved view preference (table is the default)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('clientViewMode');
+      if (saved === 'grid' || saved === 'table') {
+        setViewMode(saved);
+      }
+    } catch {}
+  }, []);
+
+  const changeViewMode = (mode: 'table' | 'grid') => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem('clientViewMode', mode);
+    } catch {}
+  };
 
   const searchParamsHook = useSearchParams();
 
@@ -392,6 +413,36 @@ function DashboardContent() {
           >
             <Filter className="h-4 w-4" /> Filter {isFilterActive && '•'}
           </Button>
+
+          {/* View toggle: table (default) / grid */}
+          <div className="flex items-center rounded-xl border border-slate-200/80 bg-white p-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => changeViewMode('table')}
+              aria-pressed={viewMode === 'table'}
+              title="Tampilan Tabel"
+              className={cn(
+                'flex items-center gap-1.5 rounded-lg px-2.5 h-8 text-sm font-medium transition-colors',
+                viewMode === 'table' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
+              )}
+            >
+              <List className="h-4 w-4" />
+              <span className="hidden sm:inline">Tabel</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => changeViewMode('grid')}
+              aria-pressed={viewMode === 'grid'}
+              title="Tampilan Grid"
+              className={cn(
+                'flex items-center gap-1.5 rounded-lg px-2.5 h-8 text-sm font-medium transition-colors',
+                viewMode === 'grid' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
+              )}
+            >
+              <LayoutGrid className="h-4 w-4" />
+              <span className="hidden sm:inline">Grid</span>
+            </button>
+          </div>
         </div>
 
         {/* Collapsible Parallel Filter Panel */}
@@ -587,6 +638,7 @@ function DashboardContent() {
           </div>
         ) : (
           <>
+            {viewMode === 'grid' ? (
             <div className={cn("grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 transition-opacity", isLoading && "opacity-60")}>
               {clients.map((client, index) => {
                 let customValuesObj: Record<string, string> = {};
@@ -765,6 +817,135 @@ function DashboardContent() {
                 );
               })}
             </div>
+            ) : (
+            <div className={cn("overflow-x-auto rounded-2xl border border-slate-100 bg-white shadow-sm transition-opacity", isLoading && "opacity-60")}>
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    <th className="px-4 py-3">Client</th>
+                    <th className="px-4 py-3">Potensi</th>
+                    <th className="px-4 py-3">Stage</th>
+                    <th className="px-4 py-3 hidden md:table-cell">No HP</th>
+                    <th className="px-4 py-3 hidden lg:table-cell">Update</th>
+                    <th className="px-4 py-3 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clients.map((client) => (
+                    <tr
+                      key={client.id}
+                      className={cn(
+                        "border-b border-slate-100 last:border-0 hover:bg-slate-50/60 transition-colors align-top",
+                        client.isPinned && "bg-amber-50/40",
+                        client.stage === 'Closing' && "bg-emerald-50/30",
+                        client.stage === 'Batal' && "opacity-60"
+                      )}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-start gap-1.5">
+                          {client.isPinned && <Pin className="h-3.5 w-3.5 mt-0.5 fill-amber-500 text-amber-500 shrink-0" />}
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-900">{client.name}</div>
+                            <div className="flex items-center gap-1 text-xs text-slate-500">
+                              <Building2 className="h-3 w-3 text-slate-400 shrink-0" />
+                              <span className="truncate">{client.businessName}</span>
+                            </div>
+                            {isSuperAdmin && (
+                              <div className="text-[9px] text-slate-400/80 italic font-mono mt-0.5">
+                                Dibuat: {client.createdByUsername || 'System'}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">{getCategoryBadge(client.category)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-0.5">
+                          <Badge
+                            variant="outline"
+                            className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium w-fit', getStageStyle(client.stage || 'Baru'))}
+                          >
+                            {client.stage || 'Baru'}
+                          </Badge>
+                          {client.stage === 'Closing' && client.dealValue != null && (
+                            <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                              <Trophy className="h-3 w-3" /> {formatRupiah(client.dealValue)}
+                            </span>
+                          )}
+                          {client.stage === 'Batal' && client.lostReason && (
+                            <span className="text-xs text-slate-500 italic">{client.lostReason}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 hidden md:table-cell">
+                        <a href={`tel:${client.phone}`} className="hover:underline text-slate-600 font-mono text-xs">
+                          {client.phone}
+                        </a>
+                      </td>
+                      <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-400 whitespace-nowrap">
+                        {formatDate(client.updatedAt)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                              "h-8 w-8 rounded-lg transition-colors",
+                              client.isPinned
+                                ? "text-amber-500 hover:text-amber-600 bg-amber-50 hover:bg-amber-100"
+                                : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                            )}
+                            onClick={async () => {
+                              const res = await togglePinClient(client.id);
+                              if (res.success) {
+                                toast.success(client.isPinned ? 'Sematan berhasil dilepas' : 'Client berhasil disematkan');
+                                fetchClients();
+                              } else {
+                                toast.error(res.error || 'Gagal menyematkan client');
+                              }
+                            }}
+                            title={client.isPinned ? "Lepas Pin" : "Sematkan Teratas"}
+                          >
+                            <Pin className={cn("h-4 w-4", client.isPinned && "fill-amber-500")} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                            onClick={() => viewLogs(client.id)}
+                            title="Log & Keterangan"
+                          >
+                            <History className="h-4 w-4" />
+                          </Button>
+                          {isAtLeastAdmin && (
+                            <>
+                              <Link
+                                href={`/edit/${client.id}`}
+                                className={buttonVariants({ variant: 'ghost', size: 'icon', className: 'h-8 w-8 text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg' })}
+                                title="Edit Data"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Link>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
+                                onClick={() => setDeleteClientId(client.id)}
+                                title="Hapus"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            )}
 
             {/* Pagination Controls */}
             {totalPages > 1 && (
