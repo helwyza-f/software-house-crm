@@ -139,7 +139,7 @@ export default function HistoryPage() {
                   </div>
                   
                   <div 
-                    onClick={() => router.push(`/?openLogs=${item.clientId}`)}
+                    onClick={() => router.push(`/clients?openLogs=${item.clientId}`)}
                     className="text-slate-700 bg-slate-50/60 hover:bg-blue-50/40 hover:border-blue-200 p-3.5 rounded-xl border border-slate-100 transition-all cursor-pointer group flex flex-col gap-1 shadow-sm relative pr-10"
                     title="Klik untuk buka riwayat detail client ini"
                   >

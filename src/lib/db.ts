@@ -16,6 +16,7 @@ export interface Client {
   dealValue?: number | null;
   lostReason?: string | null;
   closedAt?: string | null;
+  respondedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   createdById?: number | null;
@@ -123,6 +124,7 @@ const initDb = async () => {
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "dealValue" NUMERIC(15,0);
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "lostReason" VARCHAR(255);
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "closedAt" TIMESTAMP;
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS "respondedAt" TIMESTAMP;
 
       ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "userId" INTEGER REFERENCES users(id) ON DELETE SET NULL;
       ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "createdBy" VARCHAR(255);

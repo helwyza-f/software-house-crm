@@ -86,7 +86,7 @@ export default function EditClientPage({ params }: EditProps) {
         setOriginalStage(loadedStage);
       } else {
         toast.error(clientRes.error || 'Client tidak ditemukan');
-        router.push('/');
+        router.push('/clients');
       }
       setFetching(false);
     }
@@ -142,7 +142,7 @@ export default function EditClientPage({ params }: EditProps) {
     setLoading(false);
     if (res.success) {
       toast.success('Data client berhasil diperbarui');
-      router.push('/');
+      router.push('/clients');
     } else {
       toast.error(res.error || 'Gagal memperbarui data client');
     }
@@ -160,8 +160,8 @@ export default function EditClientPage({ params }: EditProps) {
     <div className="max-w-xl mx-auto w-full px-4 py-6 md:py-10 flex-grow flex flex-col gap-4">
       {/* Back button */}
       <div>
-        <Link href="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900 transition-colors font-medium">
-          <ChevronLeft className="h-4 w-4" /> Kembali ke Dashboard
+        <Link href="/clients" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900 transition-colors font-medium">
+          <ChevronLeft className="h-4 w-4" /> Kembali ke Daftar Client
         </Link>
       </div>
 
