@@ -9,13 +9,13 @@ import {
   addClientLog,
   getGlobalOptions,
   getSession,
-  logout,
   togglePinClient,
   markResponded,
   ClientWithLogs
 } from '../actions';
 import { Client } from '@/lib/db';
 import { STAGES } from '@/lib/stages';
+import { AppHeader } from '@/components/app-header';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@/components/ui/card';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,23 +41,19 @@ import {
   Edit3, 
   Trash2, 
   User, 
-  Users,
   Pin,
   MessageSquarePlus, 
   Filter, 
   Calendar,
   CalendarRange,
-  Settings,
   ChevronLeft,
   ChevronRight,
-  LogOut,
   X,
   Trophy,
   LayoutGrid,
   List,
   Pencil,
   CheckCheck,
-  LayoutDashboard
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -252,12 +248,6 @@ function DashboardContent() {
     }
   };
 
-  const handleLogout = async () => {
-    await logout();
-    toast.success('Berhasil keluar');
-    window.location.href = '/login';
-  };
-
   const handleMarkResponded = async (client: Client) => {
     const res = await markResponded(client.id);
     if (res.success) {
@@ -333,70 +323,11 @@ function DashboardContent() {
     <div className="max-w-6xl mx-auto w-full px-4 py-6 md:py-10 flex-grow flex flex-col gap-6">
       
       {/* Header */}
-      <header className="flex flex-col gap-2 pb-2 border-b border-slate-100">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">LeadManager</h1>
-            <p className="text-sm text-slate-500">
-              Kelola data calon client Software House dengan mudah.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 self-end sm:self-center">
-            {/* User Session status */}
-            <div className="flex items-center gap-2 text-xs bg-slate-100 border border-slate-200/50 p-1 px-3 rounded-full text-slate-600 font-medium">
-              <User className="h-3.5 w-3.5 text-slate-400" />
-              <span>{userSession?.username} ({userSession?.role === 'super_admin' ? 'Super Admin' : (userSession?.role === 'admin' ? 'Admin' : 'Staff')})</span>
-              <span className="text-slate-300">|</span>
-              <button onClick={handleLogout} className="hover:text-rose-600 font-bold flex items-center gap-1 select-none">
-                <LogOut className="h-3 w-3" /> Keluar
-              </button>
-            </div>
-            
-            {isSuperAdmin && (
-              <Link 
-                href="/users" 
-                title="Manajemen Akun Pengguna"
-                className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
-              >
-                <Users className="h-4.5 w-4.5" />
-              </Link>
-            )}
-            
-            {isAtLeastAdmin && (
-              <Link 
-                href="/settings" 
-                title="Konfigurasi Variabel"
-                className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
-              >
-                <Settings className="h-4.5 w-4.5" />
-              </Link>
-            )}
-
-            <Link
-              href="/"
-              title="Dashboard"
-              className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
-            >
-              <LayoutDashboard className="h-4.5 w-4.5" />
-            </Link>
-
-            <Link
-              href="/history"
-              title="Riwayat Aktivitas Global"
-              className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
-            >
-              <History className="h-4.5 w-4.5" />
-            </Link>
-            
-            <Link 
-              href="/add"
-              className={buttonVariants({ variant: 'default', size: 'sm', className: 'rounded-full shadow-sm text-sm' })}
-            >
-              <Plus className="h-4 w-4 mr-1" /> Client Baru
-            </Link>
-          </div>
-        </div>
-      </header>
+      <AppHeader
+        title="LeadManager"
+        subtitle="Kelola data calon client Software House dengan mudah."
+        session={userSession}
+      />
 
       {/* Filter and Search Bar */}
       <section className="flex flex-col gap-3">
