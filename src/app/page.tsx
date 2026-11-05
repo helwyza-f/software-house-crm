@@ -1,13 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { getSession, getDashboardStats, getGlobalHistory } from './actions';
+import { getDashboardStats, getGlobalHistory } from './actions';
 import { Card } from '@/components/ui/card';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { AppHeader } from '@/components/app-header';
 import {
   UserPlus,
   Activity,
@@ -39,7 +38,6 @@ interface HistoryItem {
 }
 
 export default function DashboardPage() {
-  const [userSession, setUserSession] = useState<{ id: number; username: string; role: 'super_admin' | 'admin' | 'staff' } | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,12 +47,10 @@ export default function DashboardPage() {
 
   const loadData = async () => {
     setLoading(true);
-    const [sessionRes, statsRes, historyRes] = await Promise.all([
-      getSession(),
+    const [statsRes, historyRes] = await Promise.all([
       getDashboardStats(todayStr),
       getGlobalHistory(8),
     ]);
-    setUserSession(sessionRes);
     if (statsRes.success && statsRes.data) {
       setStats(statsRes.data);
     } else {
@@ -122,20 +118,19 @@ export default function DashboardPage() {
     <div className="max-w-6xl mx-auto w-full px-4 py-6 md:py-10 flex-grow flex flex-col gap-6">
 
       {/* Header */}
-      <AppHeader
-        title="Dashboard"
-        subtitle={todayLabel}
-        session={userSession}
-        extra={
-          <button
-            onClick={loadData}
-            title="Muat ulang"
-            className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200' })}
-          >
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-          </button>
-        }
-      />
+      <header className="flex items-start justify-between gap-3 pb-1">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+          <p className="text-xs sm:text-sm text-slate-500">{todayLabel}</p>
+        </div>
+        <button
+          onClick={loadData}
+          title="Muat ulang"
+          className={buttonVariants({ variant: 'outline', size: 'icon', className: 'rounded-full h-9 w-9 text-slate-600 hover:bg-slate-50 border-slate-200 shrink-0' })}
+        >
+          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+        </button>
+      </header>
 
       {/* KPI cards */}
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

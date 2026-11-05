@@ -15,7 +15,6 @@ import {
 } from '../actions';
 import { Client } from '@/lib/db';
 import { STAGES } from '@/lib/stages';
-import { AppHeader } from '@/components/app-header';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@/components/ui/card';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -323,11 +322,10 @@ function DashboardContent() {
     <div className="max-w-6xl mx-auto w-full px-4 py-6 md:py-10 flex-grow flex flex-col gap-6">
       
       {/* Header */}
-      <AppHeader
-        title="LeadManager"
-        subtitle="Kelola data calon client Software House dengan mudah."
-        session={userSession}
-      />
+      <header className="pb-1">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Daftar Client</h1>
+        <p className="text-xs sm:text-sm text-slate-500">Kelola data calon client Software House dengan mudah.</p>
+      </header>
 
       {/* Filter and Search Bar */}
       <section className="flex flex-col gap-3">
