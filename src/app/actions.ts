@@ -200,7 +200,9 @@ export async function getClients(
   endDate = '',
   page = 1, 
   limit = 12,
-  stage = ''
+  stage = '',
+  province = '',
+  city = ''
 ) {
   try {
     const session = await getSession();
@@ -216,7 +218,7 @@ export async function getClients(
     const userLimitId = (dbUser.role !== 'super_admin' && !dbUser.canViewAll) ? session.id : undefined;
 
     // Helper to build WHERE clause
-    const buildWhere = (s: string, cat: string, bus: string, info: string, sDate: string, eDate: string, limitId?: number, stg = '') => {
+    const buildWhere = (s: string, cat: string, bus: string, info: string, sDate: string, eDate: string, limitId?: number, stg = '', prov = '', cty = '') => {
       let where = ' WHERE 1=1';
       const params: (string | number)[] = [];
       let pCount = 1;
@@ -252,6 +254,26 @@ export async function getClients(
         pCount += 1;
       }
 
+      if (prov && prov !== 'ALL') {
+        if (prov === 'Tidak Ada') {
+          where += ` AND (province IS NULL OR province = '')`;
+        } else {
+          where += ` AND province = $${pCount}`;
+          params.push(prov);
+          pCount += 1;
+        }
+      }
+
+      if (cty && cty !== 'ALL') {
+        if (cty === 'Tidak Ada') {
+          where += ` AND (city IS NULL OR city = '')`;
+        } else {
+          where += ` AND city = $${pCount}`;
+          params.push(cty);
+          pCount += 1;
+        }
+      }
+
       if (sDate) {
         where += ` AND "createdAt"::date >= $${pCount}::date`;
         params.push(sDate);
@@ -275,11 +297,13 @@ export async function getClients(
 
     // Build one WHERE per facet (each ignores its own filter) and run everything concurrently.
     // Facet totals are derived from the grouped counts, so no separate COUNT(*) queries are needed.
-    const { where: mainWhere, params: mainParams, nextParamIndex } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId, stage);
-    const { where: catWhere, params: catParams } = buildWhere(search, 'ALL', businessType, infoSource, startDate, endDate, userLimitId, stage);
-    const { where: busWhere, params: busParams } = buildWhere(search, category, 'ALL', infoSource, startDate, endDate, userLimitId, stage);
-    const { where: infoWhere, params: infoParams } = buildWhere(search, category, businessType, 'ALL', startDate, endDate, userLimitId, stage);
-    const { where: stageWhere, params: stageParams } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId);
+    const { where: mainWhere, params: mainParams, nextParamIndex } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId, stage, province, city);
+    const { where: catWhere, params: catParams } = buildWhere(search, 'ALL', businessType, infoSource, startDate, endDate, userLimitId, stage, province, city);
+    const { where: busWhere, params: busParams } = buildWhere(search, category, 'ALL', infoSource, startDate, endDate, userLimitId, stage, province, city);
+    const { where: infoWhere, params: infoParams } = buildWhere(search, category, businessType, 'ALL', startDate, endDate, userLimitId, stage, province, city);
+    const { where: stageWhere, params: stageParams } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId, '', province, city);
+    const { where: provWhere, params: provParams } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId, stage, 'ALL', city);
+    const { where: cityWhere, params: cityParams } = buildWhere(search, category, businessType, infoSource, startDate, endDate, userLimitId, stage, province, 'ALL');
 
     const offset = (page - 1) * limit;
     const listQuery = `
@@ -291,13 +315,15 @@ export async function getClients(
       LIMIT $${nextParamIndex} OFFSET $${nextParamIndex + 1}
     `;
 
-    const [countRes, listRes, catCountsRes, busCountsRes, infoCountsRes, stageCountsRes] = await Promise.all([
+    const [countRes, listRes, catCountsRes, busCountsRes, infoCountsRes, stageCountsRes, provCountsRes, cityCountsRes] = await Promise.all([
       pool.query(`SELECT COUNT(*) as count FROM clients${mainWhere}`, mainParams),
       pool.query(listQuery, [...mainParams, limit, offset]),
       pool.query(`SELECT category, COUNT(*) as count FROM clients${catWhere} GROUP BY category`, catParams),
       pool.query(`SELECT "businessType", COUNT(*) as count FROM clients${busWhere} GROUP BY "businessType"`, busParams),
       pool.query(`SELECT "infoSource", COUNT(*) as count FROM clients${infoWhere} GROUP BY "infoSource"`, infoParams),
       pool.query(`SELECT stage, COUNT(*) as count FROM clients${stageWhere} GROUP BY stage`, stageParams),
+      pool.query(`SELECT province, COUNT(*) as count FROM clients${provWhere} GROUP BY province`, provParams),
+      pool.query(`SELECT city, COUNT(*) as count FROM clients${cityWhere} GROUP BY city`, cityParams),
     ]);
 
     const total = parseInt(countRes.rows[0].count, 10);
@@ -332,6 +358,20 @@ export async function getClients(
       stageCounts.ALL += n;
     });
 
+    const provinceCounts: Record<string, number> = { ALL: 0 };
+    provCountsRes.rows.forEach((row: { province: string | null; count: string }) => {
+      const n = parseInt(row.count, 10);
+      provinceCounts[row.province || 'Tidak Ada'] = (provinceCounts[row.province || 'Tidak Ada'] || 0) + n;
+      provinceCounts.ALL += n;
+    });
+
+    const cityCounts: Record<string, number> = { ALL: 0 };
+    cityCountsRes.rows.forEach((row: { city: string | null; count: string }) => {
+      const n = parseInt(row.count, 10);
+      cityCounts[row.city || 'Tidak Ada'] = (cityCounts[row.city || 'Tidak Ada'] || 0) + n;
+      cityCounts.ALL += n;
+    });
+
     return { 
       success: true, 
       data: {
@@ -343,7 +383,9 @@ export async function getClients(
           categories: categoryCounts,
           businessTypes: businessTypeCounts,
           infoSources: infoSourceCounts,
-          stages: stageCounts
+          stages: stageCounts,
+          provinces: provinceCounts,
+          cities: cityCounts
         }
       }
     };
@@ -381,6 +423,8 @@ export async function createClient(
     category: 'High' | 'Medium' | 'Low';
     businessType?: string;
     infoSource?: string;
+    province?: string;
+    city?: string;
     customValues?: string;
   },
   initialLog?: string
@@ -395,8 +439,8 @@ export async function createClient(
     await dbClient.query('BEGIN');
 
     const clientQuery = `
-      INSERT INTO clients (name, phone, "businessName", address, category, "businessType", "infoSource", "customValues", "createdById", "createdAt", "updatedAt")
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO clients (name, phone, "businessName", address, category, "businessType", "infoSource", province, city, "customValues", "createdById", "createdAt", "updatedAt")
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING id
     `;
     const clientParams = [
@@ -407,6 +451,8 @@ export async function createClient(
       clientData.category,
       clientData.businessType || '',
       clientData.infoSource || '',
+      clientData.province || '',
+      clientData.city || '',
       clientData.customValues || '{}',
       session.id
     ];
@@ -455,6 +501,8 @@ export async function updateClient(
     category: 'High' | 'Medium' | 'Low';
     businessType?: string;
     infoSource?: string;
+    province?: string;
+    city?: string;
     customValues?: string;
   }
 ) {
@@ -475,9 +523,9 @@ export async function updateClient(
     const oldClient = oldRes.rows[0];
 
     const query = `
-      UPDATE clients 
-      SET name = $1, phone = $2, "businessName" = $3, address = $4, category = $5, "businessType" = $6, "infoSource" = $7, "customValues" = $8, "updatedAt" = CURRENT_TIMESTAMP
-      WHERE id = $9
+      UPDATE clients
+      SET name = $1, phone = $2, "businessName" = $3, address = $4, category = $5, "businessType" = $6, "infoSource" = $7, province = $8, city = $9, "customValues" = $10, "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = $11
     `;
     const params = [
       clientData.name,
@@ -487,6 +535,8 @@ export async function updateClient(
       clientData.category,
       clientData.businessType || '',
       clientData.infoSource || '',
+      clientData.province || '',
+      clientData.city || '',
       clientData.customValues || '{}',
       id
     ];
@@ -502,6 +552,8 @@ export async function updateClient(
     if (oldClient.category !== clientData.category) changes.push(`Potensi: "${oldClient.category}" ➔ "${clientData.category}"`);
     if (oldClient.businessType !== clientData.businessType) changes.push(`Jenis Usaha: "${oldClient.businessType || 'Kosong'}" ➔ "${clientData.businessType || 'Kosong'}"`);
     if (oldClient.infoSource !== clientData.infoSource) changes.push(`Sumber Info: "${oldClient.infoSource || 'Kosong'}" ➔ "${clientData.infoSource || 'Kosong'}"`);
+    if ((oldClient.province || '') !== (clientData.province || '')) changes.push(`Provinsi: "${oldClient.province || 'Kosong'}" ➔ "${clientData.province || 'Kosong'}"`);
+    if ((oldClient.city || '') !== (clientData.city || '')) changes.push(`Kota/Kab: "${oldClient.city || 'Kosong'}" ➔ "${clientData.city || 'Kosong'}"`);
 
     if (changes.length > 0) {
       const displayRole = session.role === 'super_admin' ? 'Super Admin' : 'Admin';

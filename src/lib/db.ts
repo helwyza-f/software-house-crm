@@ -10,6 +10,8 @@ export interface Client {
   category: 'High' | 'Medium' | 'Low';
   businessType?: string;
   infoSource?: string;
+  province?: string;
+  city?: string;
   customValues?: string;
   isPinned?: boolean;
   stage: string;
@@ -125,6 +127,8 @@ const initDb = async () => {
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "lostReason" VARCHAR(255);
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "closedAt" TIMESTAMP;
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS "respondedAt" TIMESTAMP;
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS province VARCHAR(100);
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS city VARCHAR(100);
 
       ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "userId" INTEGER REFERENCES users(id) ON DELETE SET NULL;
       ALTER TABLE client_logs ADD COLUMN IF NOT EXISTS "createdBy" VARCHAR(255);
@@ -149,6 +153,8 @@ const initDb = async () => {
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_clients_category ON clients(category);
       CREATE INDEX IF NOT EXISTS idx_clients_stage ON clients(stage);
+      CREATE INDEX IF NOT EXISTS idx_clients_province ON clients(province);
+      CREATE INDEX IF NOT EXISTS idx_clients_city ON clients(city);
       CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
       CREATE INDEX IF NOT EXISTS idx_clients_businessName ON clients("businessName");
       CREATE INDEX IF NOT EXISTS idx_client_logs_clientId ON client_logs("clientId");

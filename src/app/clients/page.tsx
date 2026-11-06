@@ -36,6 +36,7 @@ import {
   Phone, 
   Building2, 
   MapPin, 
+  MapPinned,
   History, 
   Edit3, 
   Trash2, 
@@ -70,6 +71,8 @@ function DashboardContent() {
   const [businessTypeFilter, setBusinessTypeFilter] = useState('ALL');
   const [infoSourceFilter, setInfoSourceFilter] = useState('ALL');
   const [stageFilter, setStageFilter] = useState('ALL');
+  const [provinceFilter, setProvinceFilter] = useState('ALL');
+  const [cityFilter, setCityFilter] = useState('ALL');
   const [date, setDate] = useState<DateRange | undefined>(undefined);
   const [showFilters, setShowFilters] = useState(false);
 
@@ -78,7 +81,9 @@ function DashboardContent() {
     categories: { High: 0, Medium: 0, Low: 0, ALL: 0 } as Record<string, number>,
     businessTypes: { ALL: 0 } as Record<string, number>,
     infoSources: { ALL: 0 } as Record<string, number>,
-    stages: { ALL: 0 } as Record<string, number>
+    stages: { ALL: 0 } as Record<string, number>,
+    provinces: { ALL: 0 } as Record<string, number>,
+    cities: { ALL: 0 } as Record<string, number>
   });
 
   // Global choices list
@@ -164,7 +169,9 @@ function DashboardContent() {
         endDateStr, 
         page, 
         itemsPerPage,
-        stageFilter
+        stageFilter,
+        provinceFilter,
+        cityFilter
       );
       if (res.success && res.data) {
         setClients(res.data.clients);
@@ -194,7 +201,7 @@ function DashboardContent() {
 
   useEffect(() => {
     fetchClients();
-  }, [debouncedSearch, categoryFilter, businessTypeFilter, infoSourceFilter, stageFilter, startDateStr, endDateStr, page]);
+  }, [debouncedSearch, categoryFilter, businessTypeFilter, infoSourceFilter, stageFilter, provinceFilter, cityFilter, startDateStr, endDateStr, page]);
 
   useEffect(() => {
     fetchDropdownOptions();
@@ -314,7 +321,7 @@ function DashboardContent() {
     }
   };
 
-  const isFilterActive = categoryFilter !== 'ALL' || businessTypeFilter !== 'ALL' || infoSourceFilter !== 'ALL' || stageFilter !== 'ALL' || !!date;
+  const isFilterActive = categoryFilter !== 'ALL' || businessTypeFilter !== 'ALL' || infoSourceFilter !== 'ALL' || stageFilter !== 'ALL' || provinceFilter !== 'ALL' || cityFilter !== 'ALL' || !!date;
   const isAtLeastAdmin = userSession?.role === 'admin' || userSession?.role === 'super_admin';
   const isSuperAdmin = userSession?.role === 'super_admin';
 
@@ -347,6 +354,8 @@ function DashboardContent() {
                 setBusinessTypeFilter('ALL');
                 setInfoSourceFilter('ALL');
                 setStageFilter('ALL');
+                setProvinceFilter('ALL');
+                setCityFilter('ALL');
                 setDate(undefined);
                 setSearch('');
                 setPage(1);
@@ -398,7 +407,7 @@ function DashboardContent() {
         {/* Collapsible Parallel Filter Panel */}
         {showFilters && (
           <Card className="border border-slate-100 shadow-inner rounded-2xl bg-slate-50/50 p-4 transition-all duration-200">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Potensi / Kategori */}
               <div className="space-y-1">
                 <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Potensi</Label>
@@ -485,6 +494,58 @@ function DashboardContent() {
                 </Select>
               </div>
 
+              {/* Provinsi */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Provinsi</Label>
+                <Select value={provinceFilter} onValueChange={(val) => { setProvinceFilter(val || 'ALL'); setCityFilter('ALL'); setPage(1); }}>
+                  <SelectTrigger className="w-full bg-white h-9.5 text-sm rounded-xl border-slate-200/80">
+                    <SelectValue placeholder="Semua Provinsi" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-sm">Semua Provinsi ({facets.provinces.ALL})</SelectItem>
+                    {Object.keys(facets.provinces)
+                      .filter((k) => k !== 'ALL' && k !== 'Tidak Ada')
+                      .sort((a, b) => a.localeCompare(b, 'id'))
+                      .map((prov) => (
+                        <SelectItem key={prov} value={prov} className="text-sm">
+                          📍 {prov} ({facets.provinces[prov] || 0})
+                        </SelectItem>
+                      ))}
+                    {facets.provinces['Tidak Ada'] !== undefined && facets.provinces['Tidak Ada'] > 0 && (
+                      <SelectItem value="Tidak Ada" className="text-sm">
+                        ❌ Belum diisi ({facets.provinces['Tidak Ada']})
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Kota / Kabupaten */}
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Kota / Kabupaten</Label>
+                <Select value={cityFilter} onValueChange={(val) => { setCityFilter(val || 'ALL'); setPage(1); }}>
+                  <SelectTrigger className="w-full bg-white h-9.5 text-sm rounded-xl border-slate-200/80">
+                    <SelectValue placeholder="Semua Kota/Kab" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL" className="text-sm">Semua Kota/Kab ({facets.cities.ALL})</SelectItem>
+                    {Object.keys(facets.cities)
+                      .filter((k) => k !== 'ALL' && k !== 'Tidak Ada')
+                      .sort((a, b) => a.localeCompare(b, 'id'))
+                      .map((cty) => (
+                        <SelectItem key={cty} value={cty} className="text-sm">
+                          🏙️ {cty} ({facets.cities[cty] || 0})
+                        </SelectItem>
+                      ))}
+                    {facets.cities['Tidak Ada'] !== undefined && facets.cities['Tidak Ada'] > 0 && (
+                      <SelectItem value="Tidak Ada" className="text-sm">
+                        ❌ Belum diisi ({facets.cities['Tidak Ada']})
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
               {/* Filter Tanggal */}
               <div className="space-y-1">
                 <Label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Tanggal Masuk</Label>
@@ -544,6 +605,8 @@ function DashboardContent() {
                     setBusinessTypeFilter('ALL');
                     setInfoSourceFilter('ALL');
                     setStageFilter('ALL');
+                    setProvinceFilter('ALL');
+                    setCityFilter('ALL');
                     setDate(undefined);
                     setPage(1);
                   }}
@@ -661,6 +724,12 @@ function DashboardContent() {
                           <div className="flex items-start gap-2">
                             <MapPin className="h-3.5 w-3.5 text-slate-400 mt-0.5" />
                             <span className="leading-relaxed">{client.address}</span>
+                          </div>
+                        )}
+                        {(client.province || client.city) && (
+                          <div className="flex items-center gap-2 text-xs text-slate-400">
+                            <MapPinned className="h-3.5 w-3.5 text-slate-400" />
+                            <span>{[client.city, client.province].filter(Boolean).join(', ')}</span>
                           </div>
                         )}
 
@@ -815,6 +884,11 @@ function DashboardContent() {
                               <Building2 className="h-3 w-3 text-slate-400 shrink-0" />
                               <span className="truncate">{client.businessName}</span>
                             </div>
+                            {(client.province || client.city) && (
+                              <div className="text-xs text-slate-400 truncate">
+                                {[client.city, client.province].filter(Boolean).join(', ')}
+                              </div>
+                            )}
                             {isSuperAdmin && (
                               <div className="text-[9px] text-slate-400/80 italic font-mono mt-0.5">
                                 Dibuat: {client.createdByUsername || 'System'}
