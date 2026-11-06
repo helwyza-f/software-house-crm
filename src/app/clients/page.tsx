@@ -11,6 +11,7 @@ import {
   getSession,
   togglePinClient,
   markResponded,
+  exportClients,
   ClientWithLogs
 } from '../actions';
 import { Client } from '@/lib/db';
@@ -54,6 +55,9 @@ import {
   List,
   Pencil,
   CheckCheck,
+  Download,
+  FileSpreadsheet,
+  FileText,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -264,6 +268,46 @@ function DashboardContent() {
     }
   };
 
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExport = async (format: 'csv' | 'xlsx', useFilter: boolean) => {
+    setIsExporting(true);
+    try {
+      const res = await exportClients(format, useFilter, {
+        search: debouncedSearch,
+        category: categoryFilter,
+        businessType: businessTypeFilter,
+        infoSource: infoSourceFilter,
+        stage: stageFilter,
+        province: provinceFilter,
+        city: cityFilter,
+        startDate: startDateStr,
+        endDate: endDateStr,
+      });
+      if (res.success && res.data) {
+        const bin = atob(res.data.base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: res.data.mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = res.data.filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        toast.success(`Berhasil mengekspor ${res.data.count} data client`);
+      } else {
+        toast.error(res.error || 'Gagal mengekspor data');
+      }
+    } catch {
+      toast.error('Gagal mengekspor data');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const getCategoryBadge = (category: string) => {
     switch (category) {
       case 'High':
@@ -372,6 +416,40 @@ function DashboardContent() {
           >
             <Filter className="h-4 w-4" /> Filter {isFilterActive && '•'}
           </Button>
+
+          {/* Export (admin only) */}
+          {isAtLeastAdmin && (
+            <Popover>
+              <PopoverTrigger
+                disabled={isExporting}
+                title="Export data"
+                className={cn(
+                  buttonVariants({ variant: 'outline', className: 'rounded-xl border-slate-200/80 text-sm flex gap-1.5 items-center px-4 bg-white' }),
+                  'shrink-0 disabled:opacity-60'
+                )}
+              >
+                <Download className="h-4 w-4" />
+                <span className="hidden sm:inline">{isExporting ? 'Menyiapkan...' : 'Export'}</span>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64 p-2 rounded-2xl border border-slate-100 shadow-xl bg-white">
+                <div className="px-2 py-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Export data mengikuti filter</div>
+                <button type="button" onClick={() => handleExport('xlsx', true)} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm text-slate-700 hover:bg-slate-50">
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" /> Excel (filter aktif)
+                </button>
+                <button type="button" onClick={() => handleExport('csv', true)} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm text-slate-700 hover:bg-slate-50">
+                  <FileText className="h-4 w-4 text-slate-500" /> CSV (filter aktif)
+                </button>
+                <div className="border-t border-slate-100 my-1" />
+                <div className="px-2 py-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Export semua data</div>
+                <button type="button" onClick={() => handleExport('xlsx', false)} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm text-slate-700 hover:bg-slate-50">
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" /> Excel (semua)
+                </button>
+                <button type="button" onClick={() => handleExport('csv', false)} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm text-slate-700 hover:bg-slate-50">
+                  <FileText className="h-4 w-4 text-slate-500" /> CSV (semua)
+                </button>
+              </PopoverContent>
+            </Popover>
+          )}
 
           {/* View toggle: table (default) / grid */}
           <div className="flex items-center rounded-xl border border-slate-200/80 bg-white p-0.5 shrink-0">

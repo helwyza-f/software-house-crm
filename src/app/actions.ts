@@ -1005,6 +1005,153 @@ export async function getDashboardStats(today: string) {
   }
 }
 
+export async function exportClients(
+  format: 'csv' | 'xlsx',
+  useFilter: boolean,
+  filters: {
+    search?: string;
+    category?: string;
+    businessType?: string;
+    infoSource?: string;
+    stage?: string;
+    province?: string;
+    city?: string;
+    startDate?: string;
+    endDate?: string;
+  } = {}
+) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return { success: false, error: 'Harus login terlebih dahulu' };
+    }
+    if (session.role !== 'admin' && session.role !== 'super_admin') {
+      return { success: false, error: 'Akses Ditolak: Hanya Admin atau Super Admin yang dapat mengekspor data' };
+    }
+
+    // Build WHERE from the active filters (admins see all clients).
+    let where = ' WHERE 1=1';
+    const params: (string | number)[] = [];
+    let p = 1;
+    if (useFilter) {
+      const f = filters;
+      if (f.search && f.search.trim()) {
+        where += ` AND (name ILIKE $${p} OR "businessName" ILIKE $${p + 1} OR phone ILIKE $${p + 2} OR address ILIKE $${p + 3} OR "businessType" ILIKE $${p + 4} OR "infoSource" ILIKE $${p + 5})`;
+        const sp = `%${f.search.trim()}%`;
+        params.push(sp, sp, sp, sp, sp, sp);
+        p += 6;
+      }
+      const eq = (col: string, val?: string) => {
+        if (val && val !== 'ALL') {
+          if (val === 'Tidak Ada') {
+            where += ` AND (${col} IS NULL OR ${col} = '')`;
+          } else {
+            where += ` AND ${col} = $${p}`;
+            params.push(val);
+            p += 1;
+          }
+        }
+      };
+      eq('category', f.category);
+      eq('"businessType"', f.businessType);
+      eq('"infoSource"', f.infoSource);
+      eq('stage', f.stage);
+      eq('province', f.province);
+      eq('city', f.city);
+      if (f.startDate) { where += ` AND "createdAt"::date >= $${p}::date`; params.push(f.startDate); p += 1; }
+      if (f.endDate) { where += ` AND "createdAt"::date <= $${p}::date`; params.push(f.endDate); p += 1; }
+    }
+
+    const res = await pool.query(
+      `SELECT clients.*, u.username as "createdByUsername"
+       FROM clients
+       LEFT JOIN users u ON clients."createdById" = u.id
+       ${where}
+       ORDER BY clients."isPinned" DESC, clients."updatedAt" DESC`,
+      params
+    );
+    const rows = res.rows as Client[];
+
+    const fmtDate = (d: unknown) => {
+      if (!d) return '';
+      try {
+        return new Intl.DateTimeFormat('id-ID', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(d as string));
+      } catch {
+        return '';
+      }
+    };
+
+    const headers = [
+      'Nama', 'No HP', 'Nama Usaha', 'Alamat', 'Provinsi', 'Kota/Kabupaten',
+      'Potensi', 'Stage', 'Nilai Deal', 'Alasan Batal', 'Jenis Usaha', 'Sumber Info',
+      'Sudah Merespon', 'Dibuat Oleh', 'Tanggal Masuk', 'Terakhir Update',
+    ];
+
+    const toRecord = (c: Client) => [
+      c.name || '',
+      c.phone || '',
+      c.businessName || '',
+      c.address || '',
+      c.province || '',
+      c.city || '',
+      c.category || '',
+      c.stage || 'Baru',
+      c.dealValue != null ? Number(c.dealValue) : '',
+      c.lostReason || '',
+      c.businessType || '',
+      c.infoSource || '',
+      c.respondedAt ? 'Ya' : 'Tidak',
+      c.createdByUsername || '',
+      fmtDate(c.createdAt),
+      fmtDate(c.updatedAt),
+    ];
+
+    const stamp = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Jakarta' }).format(new Date()).replace(/-/g, '');
+
+    if (format === 'csv') {
+      const esc = (v: unknown) => {
+        const s = String(v ?? '');
+        return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const lines = [headers.join(',')];
+      rows.forEach((c) => lines.push(toRecord(c).map(esc).join(',')));
+      const csv = '﻿' + lines.join('\r\n');
+      return {
+        success: true,
+        data: {
+          filename: `data-nasabah-${stamp}.csv`,
+          mime: 'text/csv;charset=utf-8',
+          base64: Buffer.from(csv, 'utf8').toString('base64'),
+          count: rows.length,
+        },
+      };
+    }
+
+    // xlsx
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Data Nasabah');
+    ws.columns = headers.map((h) => ({ header: h, width: Math.max(12, Math.min(40, h.length + 6)) }));
+    ws.getRow(1).font = { bold: true };
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+    rows.forEach((c) => ws.addRow(toRecord(c)));
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: headers.length } };
+    const buf = await wb.xlsx.writeBuffer();
+    return {
+      success: true,
+      data: {
+        filename: `data-nasabah-${stamp}.xlsx`,
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        base64: Buffer.from(buf as ArrayBuffer).toString('base64'),
+        count: rows.length,
+      },
+    };
+  } catch (error) {
+    console.error('Error exporting clients:', error);
+    return { success: false, error: 'Gagal mengekspor data' };
+  }
+}
+
 export async function getGlobalHistory(limit = 10) {
   try {
     const session = await getSession();
