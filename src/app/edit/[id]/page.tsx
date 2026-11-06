@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RegionFields } from '@/components/region-select';
 import { toast } from 'sonner';
 import { ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -36,6 +37,8 @@ export default function EditClientPage({ params }: EditProps) {
     category: 'Medium' as 'High' | 'Medium' | 'Low',
     businessType: '',
     infoSource: '',
+    province: '',
+    city: '',
     customValues: {} as Record<string, string>
   });
 
@@ -75,6 +78,8 @@ export default function EditClientPage({ params }: EditProps) {
           category: client.category,
           businessType: client.businessType || '',
           infoSource: client.infoSource || '',
+          province: client.province || '',
+          city: client.city || '',
           customValues: parsedCustom
         });
         const loadedStage = {
@@ -117,6 +122,8 @@ export default function EditClientPage({ params }: EditProps) {
       category: formData.category,
       businessType: formData.businessType,
       infoSource: formData.infoSource,
+      province: formData.province,
+      city: formData.city,
       customValues: JSON.stringify(formData.customValues)
     });
 
@@ -255,9 +262,15 @@ export default function EditClientPage({ params }: EditProps) {
               </Select>
             </div>
 
+            <RegionFields
+              province={formData.province}
+              city={formData.city}
+              onChange={(province, city) => setFormData({ ...formData, province, city })}
+            />
+
             <div className="space-y-2">
               <Label htmlFor="category" className="text-sm font-semibold text-slate-700">Kategori Potensi</Label>
-              <Select 
+              <Select
                 value={formData.category} 
                 onValueChange={(val) => { if (val) setFormData({ ...formData, category: val as 'High' | 'Medium' | 'Low' }); }}
               >

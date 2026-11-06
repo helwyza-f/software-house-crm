@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RegionFields } from '@/components/region-select';
 import { toast } from 'sonner';
 import { ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -27,6 +28,8 @@ export default function AddClientPage() {
     category: 'Medium' as 'High' | 'Medium' | 'Low',
     businessType: '',
     infoSource: '',
+    province: '',
+    city: '',
     initialLog: '',
     customValues: {} as Record<string, string>
   });
@@ -64,6 +67,8 @@ export default function AddClientPage() {
       category: formData.category,
       businessType: formData.businessType,
       infoSource: formData.infoSource,
+      province: formData.province,
+      city: formData.city,
       customValues: JSON.stringify(formData.customValues)
     }, formData.initialLog);
 
@@ -174,6 +179,12 @@ export default function AddClientPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            <RegionFields
+              province={formData.province}
+              city={formData.city}
+              onChange={(province, city) => setFormData({ ...formData, province, city })}
+            />
 
             <div className="space-y-2">
               <Label htmlFor="category" className="text-sm font-semibold text-slate-700">Kategori Potensi</Label>
